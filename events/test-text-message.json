@@ -1,0 +1,9 @@
+{
+  "httpMethod": "POST",
+  "path": "/webhook/inbound",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  "body": "waNumber=917834811114&mobile=919777777778&replyId=3914460380512464906&messageId=350465300787800379&timestamp=1564472864000&name=Sid+Smith&type=text&text=When+will+my+order+be+delivered"
+}
+

@@ -1,0 +1,42 @@
+# AWS Credentials - NEVER COMMIT THESE
+.aws/
+*.pem
+*.key
+*.docs
+*.pdf
+*.txt
+*.doc
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+*.csv
+
+# SAM
+.aws-sam/
+samconfig.toml
+
+# Node
+node_modules/
+npm-debug.log
+package-lock.json
+
+# Environment files
+.env
+env.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.md
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+

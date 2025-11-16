@@ -1,0 +1,9 @@
+{
+  "httpMethod": "POST",
+  "path": "/webhook/inbound",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  "body": "waNumber=917834811114&mobile=919777777778&timestamp=1564472900000&name=Sid+Smith&type=image&image=%7B%22mime_type%22%3A%22image%2Fjpeg%22%2C%22signature%22%3A%22c4f82d0d148dbc31d4e0b107e4057053348e7803a0d6efb168d0ec656f233a5d%22%2C%22url%22%3A%22https%3A%2F%2Fgs-datareceiver-whatsapp...%22%2C%22caption%22%3A%22This+is+a+caption+message%22%7D"
+}
+

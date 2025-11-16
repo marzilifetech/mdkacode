@@ -1,0 +1,9 @@
+{
+  "httpMethod": "POST",
+  "path": "/webhook/inbound",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  "body": "waNumber=917834811114&mobile=919777777778&name=Sid+Smith"
+}
+

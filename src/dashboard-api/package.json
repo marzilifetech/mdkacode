@@ -1,0 +1,14 @@
+{
+  "name": "dashboard-api",
+  "version": "1.0.0",
+  "description": "API Lambda for dashboard data retrieval",
+  "main": "app.js",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.490.0",
+    "@aws-sdk/lib-dynamodb": "^3.490.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

@@ -1,0 +1,330 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: WhatsApp Bot - Inbound Webhook Handler
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: nodejs18.x
+    MemorySize: 256
+    Environment:
+      Variables:
+        MESSAGE_LOG_TABLE_NAME: !Ref WhatsAppMessageLog
+        INBOUND_QUEUE_URL: !Ref InboundMessageQueue
+
+Resources:
+  # DynamoDB Table for Message Logging
+  WhatsAppMessageLog:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: WhatsAppMessageLog
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: mobile
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+        - AttributeName: conversationId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: mobile
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: conversation-index
+          KeySchema:
+            - AttributeName: conversationId
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  # DynamoDB Table for User Conversation State
+  UserConversationState:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UserConversationState
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: mobile
+          AttributeType: S
+        - AttributeName: conversationId
+          AttributeType: S
+        - AttributeName: lastInteraction
+          AttributeType: N
+      KeySchema:
+        - AttributeName: mobile
+          KeyType: HASH
+        - AttributeName: conversationId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: lastInteraction-index
+          KeySchema:
+            - AttributeName: lastInteraction
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # DynamoDB Table for User Profile (CRM)
+  UserProfile:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UserProfile
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: mobile
+          AttributeType: S
+        - AttributeName: profileType
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: city
+          AttributeType: S
+      KeySchema:
+        - AttributeName: mobile
+          KeyType: HASH
+        - AttributeName: profileType
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: city-index
+          KeySchema:
+            - AttributeName: city
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # DynamoDB Table for Human Escalation
+  HumanEscalation:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: HumanEscalation
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: escalationId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: mobile
+          AttributeType: S
+      KeySchema:
+        - AttributeName: escalationId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: mobile-index
+          KeySchema:
+            - AttributeName: mobile
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # SQS Queue for Inbound Messages
+  InboundMessageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: InboundMessageQueue
+      VisibilityTimeout: 60  # Match Lambda timeout
+      MessageRetentionPeriod: 345600  # 4 days
+
+  # Lambda Function for Inbound Webhook
+  GupshupInboundWebhook:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GupshupInboundWebhook
+      CodeUri: src/inbound-webhook/
+      Handler: app.handler
+      Runtime: nodejs18.x
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          MESSAGE_LOG_TABLE_NAME: !Ref WhatsAppMessageLog
+          INBOUND_QUEUE_URL: !Ref InboundMessageQueue
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WhatsAppMessageLog
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt InboundMessageQueue.QueueName
+        - CloudWatchLogsFullAccess
+      Events:
+        InboundWebhook:
+          Type: Api
+          Properties:
+            Path: /webhook/inbound
+            Method: post
+            RestApiId: !Ref ApiGateway
+
+  # Lambda Function for Conversation Processing
+  ConversationProcessor:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ConversationProcessor
+      CodeUri: src/conversation-processor/
+      Handler: app.handler
+      Runtime: nodejs18.x
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          USER_PROFILE_TABLE_NAME: !Ref UserProfile
+          CONVERSATION_STATE_TABLE_NAME: !Ref UserConversationState
+          MESSAGE_LOG_TABLE_NAME: !Ref WhatsAppMessageLog
+          ESCALATION_TABLE_NAME: !Ref HumanEscalation
+          GUPSHUP_USER_ID: ""  # Set via environment or parameter
+          GUPSHUP_PASSWORD: ""  # Set via environment or parameter
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserProfile
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserConversationState
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WhatsAppMessageLog
+        - DynamoDBCrudPolicy:
+            TableName: !Ref HumanEscalation
+        - CloudWatchLogsFullAccess
+      Events:
+        ProcessMessage:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt InboundMessageQueue.Arn
+            BatchSize: 1
+            MaximumBatchingWindowInSeconds: 0
+
+  # Lambda Function for Dashboard API
+  DashboardAPI:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: DashboardAPI
+      CodeUri: src/dashboard-api/
+      Handler: app.handler
+      Runtime: nodejs18.x
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          USER_PROFILE_TABLE_NAME: !Ref UserProfile
+          CONVERSATION_STATE_TABLE_NAME: !Ref UserConversationState
+          MESSAGE_LOG_TABLE_NAME: !Ref WhatsAppMessageLog
+          ESCALATION_TABLE_NAME: !Ref HumanEscalation
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserProfile
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserConversationState
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WhatsAppMessageLog
+        - DynamoDBCrudPolicy:
+            TableName: !Ref HumanEscalation
+        - CloudWatchLogsFullAccess
+      Events:
+        DashboardStats:
+          Type: Api
+          Properties:
+            Path: /dashboard/stats
+            Method: get
+            RestApiId: !Ref ApiGateway
+        DashboardUsers:
+          Type: Api
+          Properties:
+            Path: /dashboard/users
+            Method: get
+            RestApiId: !Ref ApiGateway
+        DashboardConversations:
+          Type: Api
+          Properties:
+            Path: /dashboard/conversations
+            Method: get
+            RestApiId: !Ref ApiGateway
+        DashboardMessages:
+          Type: Api
+          Properties:
+            Path: /dashboard/messages
+            Method: get
+            RestApiId: !Ref ApiGateway
+        DashboardEscalations:
+          Type: Api
+          Properties:
+            Path: /dashboard/escalations
+            Method: get
+            RestApiId: !Ref ApiGateway
+
+  # API Gateway REST API
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: WhatsAppBotApi
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+
+Outputs:
+  ApiGatewayUrl:
+    Description: API Gateway endpoint URL for webhook
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/webhook/inbound'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiGatewayUrl'
+  
+  DashboardApiUrl:
+    Description: API Gateway base URL for dashboard API
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    Export:
+      Name: !Sub '${AWS::StackName}-DashboardApiUrl'
+  
+  InboundMessageQueueUrl:
+    Description: SQS Queue URL for inbound messages
+    Value: !Ref InboundMessageQueue
+    Export:
+      Name: !Sub '${AWS::StackName}-InboundMessageQueueUrl'
+  
+  WhatsAppMessageLogTableName:
+    Description: DynamoDB Table name for message logs
+    Value: !Ref WhatsAppMessageLog
+    Export:
+      Name: !Sub '${AWS::StackName}-WhatsAppMessageLogTableName'
+  
+  UserProfileTableName:
+    Description: DynamoDB Table name for user profiles
+    Value: !Ref UserProfile
+    Export:
+      Name: !Sub '${AWS::StackName}-UserProfileTableName'
+  
+  ConversationStateTableName:
+    Description: DynamoDB Table name for conversation state
+    Value: !Ref UserConversationState
+    Export:
+      Name: !Sub '${AWS::StackName}-ConversationStateTableName'
+  
+  HumanEscalationTableName:
+    Description: DynamoDB Table name for human escalations
+    Value: !Ref HumanEscalation
+    Export:
+      Name: !Sub '${AWS::StackName}-HumanEscalationTableName'
+
