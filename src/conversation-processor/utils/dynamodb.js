@@ -44,22 +44,44 @@ async function getUserProfile(tableName, mobile) {
 async function saveUserProfile(tableName, profile) {
   try {
     const now = Date.now();
+    const profileData = {
+      ...profile,
+      profileType: 'PRIMARY',
+      updatedAt: now,
+      createdAt: profile.createdAt || now
+    };
+    
+    console.log(JSON.stringify({
+      message: '💾 Saving user profile to database',
+      table: tableName,
+      mobile: profile.mobile,
+      profileKeys: Object.keys(profileData),
+      hasName: !!profileData.name,
+      hasDOB: !!profileData.dob,
+      hasCity: !!profileData.city,
+      hasAge: !!profileData.age
+    }));
+    
     const command = new PutCommand({
       TableName: tableName,
-      Item: {
-        ...profile,
-        profileType: 'PRIMARY',
-        updatedAt: now,
-        createdAt: profile.createdAt || now
-      }
+      Item: profileData
     });
     
     await dynamoClient.send(command);
+    
+    console.log(JSON.stringify({
+      message: '✅ User profile saved successfully',
+      table: tableName,
+      mobile: profile.mobile,
+      name: profileData.name
+    }));
   } catch (error) {
     console.error(JSON.stringify({
-      message: 'Error saving user profile',
+      message: '❌ Error saving user profile',
+      table: tableName,
       mobile: profile.mobile,
-      error: error.message
+      error: error.message,
+      stack: error.stack
     }));
     throw error;
   }
@@ -106,22 +128,45 @@ async function saveConversationState(tableName, state) {
     const now = Date.now();
     const oneYearFromNow = Math.floor((now + 365 * 24 * 60 * 60 * 1000) / 1000); // TTL in seconds
     
+    const stateData = {
+      ...state,
+      updatedAt: now,
+      createdAt: state.createdAt || now,
+      ttl: oneYearFromNow
+    };
+    
+    console.log(JSON.stringify({
+      message: '💾 Saving conversation state to database',
+      table: tableName,
+      mobile: state.mobile,
+      conversationId: state.conversationId,
+      currentStep: state.currentStep,
+      flowState: state.flowState,
+      hasUserProfile: !!state.userProfile,
+      userProfileName: state.userProfile?.name || null
+    }));
+    
     const command = new PutCommand({
       TableName: tableName,
-      Item: {
-        ...state,
-        updatedAt: now,
-        createdAt: state.createdAt || now,
-        ttl: oneYearFromNow
-      }
+      Item: stateData
     });
     
     await dynamoClient.send(command);
+    
+    console.log(JSON.stringify({
+      message: '✅ Conversation state saved successfully',
+      table: tableName,
+      mobile: state.mobile,
+      conversationId: state.conversationId,
+      currentStep: state.currentStep
+    }));
   } catch (error) {
     console.error(JSON.stringify({
-      message: 'Error saving conversation state',
+      message: '❌ Error saving conversation state',
+      table: tableName,
       mobile: state.mobile,
-      error: error.message
+      error: error.message,
+      stack: error.stack
     }));
     throw error;
   }
@@ -142,8 +187,19 @@ async function saveMessageLog(tableName, message) {
         timestamp: Number(message.timestamp),
         processed: true,
         processedAt: Date.now()
-      }).filter(([_, value]) => value !== undefined)
+      }).filter(([_, value]) => value !== undefined && value !== null)
     );
+    
+    console.log(JSON.stringify({
+      message: '💾 Saving message log to database',
+      table: tableName,
+      mobile: message.mobile,
+      messageKeys: Object.keys(cleanMessage),
+      hasMessageText: !!cleanMessage.messageText,
+      hasResponseSent: !!cleanMessage.responseSent,
+      conversationId: cleanMessage.conversationId,
+      step: cleanMessage.step
+    }));
     
     const command = new PutCommand({
       TableName: tableName,
@@ -151,11 +207,20 @@ async function saveMessageLog(tableName, message) {
     });
     
     await dynamoClient.send(command);
+    
+    console.log(JSON.stringify({
+      message: '✅ Message log saved successfully',
+      table: tableName,
+      mobile: message.mobile,
+      timestamp: cleanMessage.timestamp
+    }));
   } catch (error) {
     console.error(JSON.stringify({
-      message: 'Error saving message log',
+      message: '❌ Error saving message log',
+      table: tableName,
       mobile: message.mobile,
-      error: error.message
+      error: error.message,
+      stack: error.stack
     }));
     throw error;
   }

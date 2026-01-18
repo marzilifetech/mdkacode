@@ -121,12 +121,36 @@ function generateConversationId(mobile) {
  * @returns {string} Message text
  */
 function extractMessageText(messageData) {
+  // Check for messageText first (from webhook normalization)
+  if (messageData.messageText) {
+    return messageData.messageText;
+  }
+  
+  // Check for text field (legacy format)
   if (messageData.text) {
     return messageData.text;
   }
-  if (messageData.type === 'image' && messageData.image && messageData.image.caption) {
-    return messageData.image.caption;
+  
+  // Check for image caption
+  if (messageData.type === 'image' && messageData.image) {
+    if (typeof messageData.image === 'object' && messageData.image.caption) {
+      return messageData.image.caption;
+    }
+    if (typeof messageData.image === 'string') {
+      try {
+        const imageData = JSON.parse(messageData.image);
+        return imageData.caption || '';
+      } catch (e) {
+        return '';
+      }
+    }
   }
+  
+  // Check for WhatsApp Business API format
+  if (messageData.payload && messageData.payload.text && messageData.payload.text.body) {
+    return messageData.payload.text.body;
+  }
+  
   return '';
 }
 

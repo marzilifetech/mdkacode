@@ -171,6 +171,40 @@ async function processStep(state, messageText, messageData) {
       isFirstMessage
     }));
     
+    // Try to extract name from greeting (e.g., "Hello My Name is Mayank")
+    // Only extract if the message contains name-related keywords, not simple greetings
+    const hasNameKeywords = /(?:my[\s]+name|name[\s]+is|i[\s]+am|i'm|this[\s]+is|call[\s]+me)/i.test(messageText);
+    const extractedName = hasNameKeywords ? extractName(messageText) : null;
+    
+    if (extractedName && currentStep === 'greeting' && extractedName.length > 2) {
+      // Validate that extracted name is not a greeting word
+      const normalizedName = extractedName.toLowerCase();
+      const isGreetingWord = ['hello', 'hi', 'hey', 'yes', 'no', 'ok', 'okay'].includes(normalizedName);
+      
+      if (!isGreetingWord) {
+        console.log(JSON.stringify({
+          message: 'Name extracted from greeting',
+          extractedName,
+          originalMessage: messageText
+        }));
+        
+        // If we're in greeting step and name is found, move to DOB collection
+        return {
+          nextStep: 'collect_dob',
+          flowState: 'collecting',
+          stepData: {
+            collectDetails: {
+              name: extractedName
+            }
+          },
+          userProfile: {
+            name: extractedName
+          },
+          responseMessage: getMessage('askDOB', extractedName)
+        };
+      }
+    }
+    
     // If greeting detected, always show full greeting message and reset to greeting step
     return {
       nextStep: 'greeting',
@@ -252,6 +286,39 @@ async function processStep(state, messageText, messageData) {
 function processGreeting(messageText, intent) {
   // If user sends greeting (Hello, Hi), show full greeting message
   if (intent.intent === 'greeting' || isGreeting(messageText)) {
+    // Only try to extract name if message contains name-related keywords
+    const hasNameKeywords = /(?:my[\s]+name|name[\s]+is|i[\s]+am|i'm|this[\s]+is|call[\s]+me)/i.test(messageText);
+    const extractedName = hasNameKeywords ? extractName(messageText) : null;
+    
+    // If name is found in greeting, skip name collection and go to DOB
+    if (extractedName && extractedName.length > 2) {
+      // Validate that extracted name is not a greeting word
+      const normalizedName = extractedName.toLowerCase();
+      const isGreetingWord = ['hello', 'hi', 'hey', 'yes', 'no', 'ok', 'okay'].includes(normalizedName);
+      
+      if (!isGreetingWord) {
+        console.log(JSON.stringify({
+          message: 'Name extracted from greeting in processGreeting',
+          extractedName,
+          originalMessage: messageText
+        }));
+        
+        return {
+          nextStep: 'collect_dob',
+          flowState: 'collecting',
+          stepData: {
+            collectDetails: {
+              name: extractedName
+            }
+          },
+          userProfile: {
+            name: extractedName
+          },
+          responseMessage: getMessage('askDOB', extractedName)
+        };
+      }
+    }
+    
     return {
       nextStep: 'greeting',
       flowState: 'collecting',
@@ -270,6 +337,37 @@ function processGreeting(messageText, intent) {
       responseMessage: getMessage('closing', 'there')
     };
   } else {
+    // Try to extract name even if not a clear greeting, but only if it has name keywords
+    const hasNameKeywords = /(?:my[\s]+name|name[\s]+is|i[\s]+am|i'm|this[\s]+is|call[\s]+me)/i.test(messageText);
+    const extractedName = hasNameKeywords ? extractName(messageText) : null;
+    
+    if (extractedName && extractedName.length > 2) {
+      const normalizedName = extractedName.toLowerCase();
+      const isGreetingWord = ['hello', 'hi', 'hey', 'yes', 'no', 'ok', 'okay'].includes(normalizedName);
+      
+      if (!isGreetingWord) {
+        console.log(JSON.stringify({
+          message: 'Name extracted from non-greeting message',
+          extractedName,
+          originalMessage: messageText
+        }));
+        
+        return {
+          nextStep: 'collect_dob',
+          flowState: 'collecting',
+          stepData: {
+            collectDetails: {
+              name: extractedName
+            }
+          },
+          userProfile: {
+            name: extractedName
+          },
+          responseMessage: getMessage('askDOB', extractedName)
+        };
+      }
+    }
+    
     return {
       nextStep: 'greeting',
       responseMessage: getMessage('invalidResponse')
@@ -628,6 +726,14 @@ async function registerUser(conversationState) {
   const { userProfile } = conversationState;
   const now = Date.now();
   
+  console.log(JSON.stringify({
+    message: '📝 Registering user in CRM',
+    mobile: userProfile.mobile,
+    name: userProfile.name,
+    age: userProfile.age,
+    city: userProfile.city
+  }));
+  
   const profile = {
     mobile: userProfile.mobile,
     name: userProfile.name,
@@ -637,6 +743,7 @@ async function registerUser(conversationState) {
     waNumber: userProfile.waNumber,
     registrationDate: now,
     status: 'active',
+    source: 'WhatsApp Bot',
     preferences: {
       holidays: false,
       events: false,
@@ -653,6 +760,12 @@ async function registerUser(conversationState) {
   };
   
   await saveUserProfile(USER_PROFILE_TABLE, profile);
+  
+  console.log(JSON.stringify({
+    message: '✅ User registered successfully',
+    mobile: userProfile.mobile,
+    name: userProfile.name
+  }));
 }
 
 module.exports = {

@@ -166,6 +166,7 @@ Resources:
         Variables:
           MESSAGE_LOG_TABLE_NAME: !Ref WhatsAppMessageLog
           INBOUND_QUEUE_URL: !Ref InboundMessageQueue
+          WHATSAPP_BUSINESS_NUMBER: "916366743602"  # WhatsApp Business number in E.164 format
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref WhatsAppMessageLog
@@ -196,8 +197,12 @@ Resources:
           CONVERSATION_STATE_TABLE_NAME: !Ref UserConversationState
           MESSAGE_LOG_TABLE_NAME: !Ref WhatsAppMessageLog
           ESCALATION_TABLE_NAME: !Ref HumanEscalation
-          GUPSHUP_USER_ID: ""  # Set via environment or parameter
-          GUPSHUP_PASSWORD: ""  # Set via environment or parameter
+          GUPSHUP_USER_ID: "2000261475"  # Gupshup Login ID
+          GUPSHUP_PASSWORD: "Op9uy64zU"  # Gupshup Password
+          WHATSAPP_TEMPLATE_ID: ""  # WhatsApp Template ID (not needed for conversational messages)
+          WHATSAPP_TEMPLATE_HAS_HEADER: "false"  # Set to "true" if template has header component
+          WHATSAPP_TEMPLATE_HAS_FOOTER: "false"  # Set to "true" if template has footer component
+          WHATSAPP_TEMPLATE_IS_INTERACTIVE: "false"  # Set to "true" if template has buttons (CTA/Quick Reply)
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UserProfile

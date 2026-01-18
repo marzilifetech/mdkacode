@@ -111,18 +111,80 @@ function extractName(message) {
   // Basic validation: name should be at least 2 characters
   if (trimmed.length < 2) return null;
   
-  // Remove common prefixes/suffixes
-  const cleaned = trimmed
-    .replace(/^(my name is|i am|i'm|this is|name is|i am called|call me)\s+/i, '')
-    .trim();
+  // Exclude common greetings and short words that are not names
+  const excludedWords = [
+    'hello', 'hi', 'hey', 'hii', 'hiii', 'hey there', 'hi there',
+    'good morning', 'good afternoon', 'good evening', 'gm', 'ga', 'ge',
+    'namaste', 'namaskar', 'greetings', 'greeting',
+    'yes', 'y', 'ya', 'yeah', 'yep', 'ok', 'okay', 'sure',
+    'no', 'n', 'nah', 'nope', 'thanks', 'thank you'
+  ];
   
-  // Name should not be too long (reasonable limit)
-  if (cleaned.length > 100) return null;
+  const normalized = trimmed.toLowerCase();
+  if (excludedWords.includes(normalized)) {
+    return null; // Don't treat greetings as names
+  }
   
-  // Name should contain at least one letter
-  if (!/[a-zA-Z]/.test(cleaned)) return null;
+  // Patterns to extract name from various formats
+  const namePatterns = [
+    // "Hello My Name is Mayank" or "Hi My Name is Mayank"
+    /(?:hello|hi|hey|greetings?|namaste|namaskar)[\s,]*my[\s]+name[\s]+is[\s]+([a-zA-Z\s]+)/i,
+    // "My Name is Mayank" or "Name is Mayank"
+    /(?:my[\s]+)?name[\s]+is[\s]+([a-zA-Z\s]+)/i,
+    // "I am Mayank" or "I'm Mayank"
+    /i[\s']*am[\s]+([a-zA-Z\s]+)/i,
+    // "This is Mayank" or "Call me Mayank"
+    /(?:this[\s]+is|call[\s]+me|i[\s]+am[\s]+called)[\s]+([a-zA-Z\s]+)/i,
+    // "I am called Mayank"
+    /i[\s]+am[\s]+called[\s]+([a-zA-Z\s]+)/i
+  ];
   
-  return cleaned || null;
+  // Try to match patterns
+  for (const pattern of namePatterns) {
+    const match = trimmed.match(pattern);
+    if (match && match[1]) {
+      const name = match[1].trim();
+      // Clean up the name (remove extra words that might have been captured)
+      const cleaned = name.split(/\s+/).slice(0, 3).join(' ').trim(); // Max 3 words
+      
+      // Don't treat excluded words as names even if extracted
+      if (excludedWords.includes(cleaned.toLowerCase())) {
+        continue;
+      }
+      
+      // Validation
+      if (cleaned.length >= 2 && cleaned.length <= 100 && /[a-zA-Z]/.test(cleaned)) {
+        return cleaned;
+      }
+    }
+  }
+  
+  // Fallback: if message doesn't match patterns but looks like a name
+  // (e.g., just "Mayank" or "Hello Mayank")
+  const simplePattern = /(?:hello|hi|hey)[\s,]+([a-zA-Z\s]{2,50})/i;
+  const simpleMatch = trimmed.match(simplePattern);
+  if (simpleMatch && simpleMatch[1]) {
+    const name = simpleMatch[1].trim();
+    // Don't treat excluded words as names
+    if (!excludedWords.includes(name.toLowerCase()) && 
+        name.length >= 2 && name.length <= 50 && /[a-zA-Z]/.test(name)) {
+      return name;
+    }
+  }
+  
+  // If no pattern matches, check if entire message is a reasonable name
+  // BUT exclude common greetings and short responses
+  if (!excludedWords.includes(normalized) && 
+      trimmed.length >= 2 && trimmed.length <= 50 && /^[a-zA-Z\s]+$/.test(trimmed)) {
+    // Additional check: if it's a single word and looks like a greeting, don't treat as name
+    const words = trimmed.split(/\s+/);
+    if (words.length === 1 && excludedWords.includes(normalized)) {
+      return null;
+    }
+    return trimmed;
+  }
+  
+  return null;
 }
 
 /**
