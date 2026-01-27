@@ -4,8 +4,8 @@
 
 const MESSAGES = {
   // Pre-check: Welcome back for existing users
-  welcomeBack: () => 
-    "Welcome back! Would you like to explore Holidays, Events, Health, or Community today?",
+  welcomeBack: (name) => 
+    `Hi *${name}*! 👋\n\nWelcome back to Marzi! Our team will contact you at the earliest.\n\nIn the meantime, feel free to explore our community:\n\n🔗 Join our WhatsApp Community: https://chat.whatsapp.com/HxjCgifvxwh7jWoetYQi2z\n\nHere's what you can explore:\n\n1️⃣ Marzi Holidays\n2️⃣ Marzi Events\n3️⃣ Marzi Health\n4️⃣ Marzi Community\n\n👉 Reply with the *number (1–4)*.`,
 
   // Step 1: Greeting
   greeting: () =>
@@ -53,10 +53,10 @@ const MESSAGES = {
     `Our events bring people together — music, movies, walks, workshops.\n\nWould you like to view upcoming events in *${city}*? (Yes/No)`,
 
   eventsYes: (city) =>
-    `Perfect! I'm connecting you with our events team for *${city}*. Here's our WhatsApp Events Group: [LINK]\n\nOur team will reach out to you shortly!`,
+    `Perfect! I'm connecting you with our events team for *${city}*. Here's our WhatsApp Events Group:\n\n🔗 https://chat.whatsapp.com/HxjCgifvxwh7jWoetYQi2z\n\nOur team will reach out to you shortly!`,
 
   eventsNo: () =>
-    "No problem! Here's our WhatsApp Events Group link: [LINK]\n\nFeel free to join and explore upcoming events.",
+    "No problem! Here's our WhatsApp Events Group link:\n\n🔗 https://chat.whatsapp.com/HxjCgifvxwh7jWoetYQi2z\n\nFeel free to join and explore upcoming events.",
 
   health: () =>
     "Our wellness plans blend yoga, nutrition & physiotherapy to manage pain naturally.\n\nWould you like a Care Manager to call you? (Yes/No)",
@@ -71,10 +71,10 @@ const MESSAGES = {
     "Marzi is a growing family of 10,000+ seniors connecting through stories & purpose.\n\nWould you like to join our WhatsApp Community? (Yes/No)",
 
   communityYes: () =>
-    "Wonderful! Here's our WhatsApp Community link: [COMMUNITY_LINK]\n\nWelcome to the Marzi family! 🎉",
+    "Wonderful! Here's our WhatsApp Community link:\n\n🔗 https://chat.whatsapp.com/HxjCgifvxwh7jWoetYQi2z\n\nWelcome to the Marzi family! 🎉",
 
   communityNo: () =>
-    "No problem! Here's our contact number: [CONTACT_NUMBER]\n\nFeel free to reach out anytime.",
+    "No problem! Here's our WhatsApp Community link if you change your mind:\n\n🔗 https://chat.whatsapp.com/HxjCgifvxwh7jWoetYQi2z\n\nFeel free to join anytime!",
 
   // Step 6: Human Escalation
   humanEscalation: (name) =>
@@ -82,7 +82,7 @@ const MESSAGES = {
 
   // Step 7: Closing
   closing: (name) =>
-    `It was lovely chatting with you, *${name}* 😊\nWishing you lots of Marzi moments ahead!`,
+    `It was lovely chatting with you, *${name}*. Wishing you lots of Marzi moments ahead!`,
 
   // Error messages
   invalidResponse: () =>

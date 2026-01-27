@@ -397,6 +397,98 @@ function shouldEscalate(message) {
   return escalationKeywords.some(keyword => normalized.includes(keyword));
 }
 
+/**
+ * Extract parent/relative details from referral message
+ * Expected format: "Name: [name], Mobile: [mobile], City: [city]"
+ * or variations like "My parent name is X, phone is Y, city is Z"
+ * @param {string} message - User message with parent details
+ * @returns {object|null} Object with parentName, parentMobile, parentCity or null
+ */
+function extractParentDetails(message) {
+  if (!message || typeof message !== 'string') return null;
+  
+  const trimmed = message.trim();
+  const result = {
+    parentName: null,
+    parentMobile: null,
+    parentCity: null
+  };
+  
+  // Pattern 1: "Name: X, Mobile: Y, City: Z" or "Name: X Mobile: Y City: Z"
+  const pattern1 = /(?:name|parent[\s]+name|name[\s]+is)[\s]*:?[\s]*([a-zA-Z\s]{2,50})[\s,]+(?:mobile|phone|number|contact)[\s]*:?[\s]*([\d\s\+\-]{10,15})[\s,]+(?:city|location)[\s]*:?[\s]*([a-zA-Z\s]{2,50})/i;
+  const match1 = trimmed.match(pattern1);
+  if (match1) {
+    result.parentName = match1[1].trim();
+    result.parentMobile = match1[2].trim().replace(/\s+/g, '');
+    result.parentCity = match1[3].trim();
+    return result;
+  }
+  
+  // Pattern 1b: More flexible - any order
+  const pattern1b = /(?:name|parent[\s]+name)[\s]*:?[\s]*([a-zA-Z\s]{2,50})/i;
+  const pattern1c = /(?:mobile|phone|number|contact)[\s]*:?[\s]*([\d\s\+\-]{10,15})/i;
+  const pattern1d = /(?:city|location)[\s]*:?[\s]*([a-zA-Z\s]{2,50})/i;
+  
+  const nameMatch = trimmed.match(pattern1b);
+  const mobileMatch = trimmed.match(pattern1c);
+  const cityMatch = trimmed.match(pattern1d);
+  
+  if (nameMatch) result.parentName = nameMatch[1].trim();
+  if (mobileMatch) result.parentMobile = mobileMatch[1].trim().replace(/\s+/g, '');
+  if (cityMatch) result.parentCity = cityMatch[1].trim();
+  
+  // Pattern 2: Extract mobile number (10 digits, may have +91 or country code) - standalone
+  if (!result.parentMobile) {
+    const mobilePattern = /(?:\+91|91)?[\s\-]?(\d{10})/;
+    const mobileMatch2 = trimmed.match(mobilePattern);
+    if (mobileMatch2) {
+      result.parentMobile = mobileMatch2[1];
+    }
+  }
+  
+  // Pattern 3: Extract name (before mobile or after "name is")
+  if (!result.parentName) {
+    const namePatterns = [
+      /(?:name|parent[\s]+name)[\s]*:?[\s]+is[\s]+([a-zA-Z\s]{2,50})/i,
+      /([a-zA-Z\s]{2,50})[\s,]+(?:mobile|phone|number)/i,
+      /^([a-zA-Z\s]{2,50})[\s,]+/i // Name at start
+    ];
+    for (const pattern of namePatterns) {
+      const match = trimmed.match(pattern);
+      if (match && match[1]) {
+        const extracted = match[1].trim();
+        // Don't treat common words as names
+        if (!['name', 'mobile', 'phone', 'city', 'location'].includes(extracted.toLowerCase())) {
+          result.parentName = extracted;
+          break;
+        }
+      }
+    }
+  }
+  
+  // Pattern 4: Extract city
+  if (!result.parentCity) {
+    const cityPatterns = [
+      /(?:city|location)[\s]*:?[\s]+is[\s]+([a-zA-Z\s]{2,50})/i,
+      /(?:city|location)[\s]*:?[\s]*([a-zA-Z\s]{2,50})/i
+    ];
+    for (const pattern of cityPatterns) {
+      const match = trimmed.match(pattern);
+      if (match && match[1]) {
+        result.parentCity = match[1].trim();
+        break;
+      }
+    }
+  }
+  
+  // If we got at least one field, return what we have
+  if (result.parentMobile || result.parentName || result.parentCity) {
+    return result;
+  }
+  
+  return null;
+}
+
 module.exports = {
   normalizeText,
   isGreeting,
@@ -406,6 +498,7 @@ module.exports = {
   extractName,
   extractDOB,
   extractCity,
+  extractParentDetails,
   matchMessageIntent,
   shouldEscalate
 };

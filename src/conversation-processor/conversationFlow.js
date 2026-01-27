@@ -1,7 +1,7 @@
 const { getMessage } = require('./utils/messages');
 const { calculateAge, isValidDOB, extractMessageText } = require('./utils/helpers');
-const { getUserProfile, saveUserProfile, getLatestConversationState, saveConversationState, createEscalation } = require('./utils/dynamodb');
-const { matchMessageIntent, shouldEscalate, extractName, extractDOB, extractCity, getMenuOption, isYes, isNo, isGreeting } = require('./utils/messageMatcher');
+const { getUserProfile, saveUserProfile, updateUserProfile, getLatestConversationState, saveConversationState, createEscalation } = require('./utils/dynamodb');
+const { matchMessageIntent, shouldEscalate, extractName, extractDOB, extractCity, extractParentDetails, getMenuOption, isYes, isNo, isGreeting } = require('./utils/messageMatcher');
 
 // Environment variables
 const USER_PROFILE_TABLE = process.env.USER_PROFILE_TABLE_NAME;
@@ -21,8 +21,48 @@ async function processConversationFlow(messageData) {
   const userProfile = await getUserProfile(USER_PROFILE_TABLE, mobile);
   const isExistingUser = userProfile && userProfile.status === 'active';
   
+  console.log(JSON.stringify({
+    message: 'User profile check',
+    mobile,
+    isExistingUser,
+    hasUserProfile: !!userProfile,
+    userName: userProfile?.name || null,
+    userStatus: userProfile?.status || null
+  }));
+  
   // Step 2: Get or create conversation state
   let conversationState = await getLatestConversationState(CONVERSATION_STATE_TABLE, mobile);
+  
+  console.log(JSON.stringify({
+    message: 'Conversation state check',
+    mobile,
+    hasConversationState: !!conversationState,
+    currentStep: conversationState?.currentStep || null,
+    hasNameInState: !!conversationState?.userProfile?.name
+  }));
+  
+  // If existing user is in any collection step, move them to registered immediately
+  if (isExistingUser && conversationState && 
+      ['greeting', 'collect_name', 'collect_dob', 'collect_city'].includes(conversationState.currentStep)) {
+    conversationState.currentStep = 'registered';
+    conversationState.flowState = 'registered';
+    conversationState.userProfile = {
+      name: userProfile.name,
+      dob: userProfile.dob,
+      city: userProfile.city,
+      age: userProfile.age,
+      mobile,
+      waNumber
+    };
+    await saveConversationState(CONVERSATION_STATE_TABLE, conversationState);
+    
+    return {
+      nextStep: 'registered',
+      flowState: 'registered',
+      responseMessage: getMessage('welcomeBack', userProfile.name),
+      conversationState
+    };
+  }
   
   // Check if this is first message (no conversation state exists)
   const isFirstMessage = !conversationState;
@@ -50,19 +90,30 @@ async function processConversationFlow(messageData) {
     // Save new conversation state
     await saveConversationState(CONVERSATION_STATE_TABLE, conversationState);
     
-    // Check if message is a greeting (Hello, Hi)
-    if (isGreeting(messageText)) {
-      return {
-        nextStep: 'registered',
-        flowState: 'registered',
-        responseMessage: getMessage('initialGreeting')
-      };
-    }
+    // For existing users, always show welcome back message with community link
+    return {
+      nextStep: 'registered',
+      flowState: 'registered',
+      responseMessage: getMessage('welcomeBack', userProfile.name)
+    };
+  } else if (isExistingUser && conversationState && conversationState.currentStep === 'greeting') {
+    // If existing user somehow ended up in greeting step, move them to registered
+    conversationState.currentStep = 'registered';
+    conversationState.flowState = 'registered';
+    conversationState.userProfile = {
+      name: userProfile.name,
+      dob: userProfile.dob,
+      city: userProfile.city,
+      age: userProfile.age,
+      mobile,
+      waNumber
+    };
+    await saveConversationState(CONVERSATION_STATE_TABLE, conversationState);
     
     return {
       nextStep: 'registered',
       flowState: 'registered',
-      responseMessage: getMessage('welcomeBack')
+      responseMessage: getMessage('welcomeBack', userProfile.name)
     };
   } else if (!conversationState) {
     // New user - start from greeting
@@ -95,8 +146,8 @@ async function processConversationFlow(messageData) {
   conversationState.lastInteraction = now;
   conversationState.updatedAt = now;
   
-  // Process based on current step
-  const result = await processStep(conversationState, messageText, messageData);
+  // Process based on current step - pass userProfile info to prevent asking existing users for details
+  const result = await processStep(conversationState, messageText, messageData, isExistingUser, userProfile);
   
   // Update conversation state
   conversationState.currentStep = result.nextStep;
@@ -105,15 +156,126 @@ async function processConversationFlow(messageData) {
     conversationState.stepData = { ...conversationState.stepData, ...result.stepData };
   }
   if (result.userProfile) {
-    conversationState.userProfile = { ...conversationState.userProfile, ...result.userProfile };
+    // For existing users, always preserve complete profile from database - never overwrite with incomplete data
+    if (isExistingUser && userProfile) {
+      // Only merge non-profile fields (like mobile, waNumber) from result, but keep DB profile data
+      conversationState.userProfile = {
+        mobile: result.userProfile.mobile || conversationState.userProfile.mobile || mobile,
+        waNumber: result.userProfile.waNumber || conversationState.userProfile.waNumber || waNumber,
+        name: userProfile.name, // Always from DB
+        dob: userProfile.dob,   // Always from DB
+        city: userProfile.city, // Always from DB
+        age: userProfile.age    // Always from DB
+      };
+    } else {
+      // For new users, merge result with existing state, ensuring mobile and waNumber are preserved
+      conversationState.userProfile = {
+        mobile: conversationState.userProfile?.mobile || mobile,
+        waNumber: conversationState.userProfile?.waNumber || waNumber,
+        ...conversationState.userProfile,
+        ...result.userProfile
+      };
+    }
+  } else if (isExistingUser && userProfile && conversationState.userProfile) {
+    // Ensure existing user profile is always complete in conversation state
+    conversationState.userProfile = {
+      ...conversationState.userProfile,
+      name: userProfile.name,
+      dob: userProfile.dob,
+      city: userProfile.city,
+      age: userProfile.age
+    };
+  } else if (!conversationState.userProfile) {
+    // Ensure userProfile exists with at least mobile
+    conversationState.userProfile = {
+      mobile,
+      waNumber
+    };
+  } else {
+    // Ensure mobile and waNumber are always set
+    conversationState.userProfile.mobile = conversationState.userProfile.mobile || mobile;
+    conversationState.userProfile.waNumber = conversationState.userProfile.waNumber || waNumber;
   }
   
   // Save updated state
   await saveConversationState(CONVERSATION_STATE_TABLE, conversationState);
   
-  // Handle registration completion
-  if (result.shouldRegister && conversationState.userProfile.age >= 50) {
-    await registerUser(conversationState);
+  // Handle registration completion - Save ALL users regardless of age
+  // shouldRegister is set when all details (name, DOB, city) are collected
+  if (result.shouldRegister) {
+    // Get age from result or conversation state
+    const userAge = result.userProfile?.age || conversationState.userProfile?.age;
+    
+    // Check for referral details in stepData
+    const referralDetails = conversationState.stepData?.referralDetails || result.stepData?.referralDetails;
+    
+    console.log(JSON.stringify({
+      message: '🔍 Registration check',
+      shouldRegister: result.shouldRegister,
+      userAge: userAge,
+      isExistingUser: isExistingUser,
+      hasMobile: !!conversationState.userProfile?.mobile,
+      hasName: !!conversationState.userProfile?.name,
+      hasDOB: !!conversationState.userProfile?.dob,
+      hasCity: !!conversationState.userProfile?.city,
+      hasReferralDetails: !!referralDetails,
+      referralDetails: referralDetails,
+      stepData: conversationState.stepData,
+      resultStepData: result.stepData,
+      conversationStateProfile: conversationState.userProfile,
+      resultProfile: result.userProfile
+    }));
+    
+    // Register ALL users (regardless of age) if they don't already exist
+    if (!isExistingUser && userAge !== null && userAge !== undefined) {
+      console.log(JSON.stringify({
+        message: '🔄 Triggering user registration',
+        mobile: conversationState.userProfile.mobile,
+        name: conversationState.userProfile.name,
+        age: userAge,
+        ageEligible: userAge >= 50,
+        dob: conversationState.userProfile.dob,
+        city: conversationState.userProfile.city
+      }));
+      
+      // Ensure conversation state has all required fields before registering
+      if (!conversationState.userProfile.mobile || !conversationState.userProfile.name || 
+          !conversationState.userProfile.dob || !conversationState.userProfile.city) {
+        console.error(JSON.stringify({
+          message: '❌ Cannot register - missing required fields in conversation state',
+          mobile: conversationState.userProfile.mobile,
+          name: conversationState.userProfile.name,
+          dob: conversationState.userProfile.dob,
+          city: conversationState.userProfile.city
+        }));
+      } else {
+        try {
+          await registerUser(conversationState);
+          console.log(JSON.stringify({
+            message: '✅ Registration completed successfully',
+            mobile: conversationState.userProfile.mobile
+          }));
+        } catch (error) {
+          console.error(JSON.stringify({
+            message: '❌ Registration failed - CRITICAL ERROR',
+            mobile: conversationState.userProfile.mobile,
+            name: conversationState.userProfile.name,
+            error: error.message,
+            stack: error.stack,
+            userProfile: conversationState.userProfile
+          }));
+          // Don't throw - we still want to send the response message
+          // But log the error so we know registration failed
+        }
+      }
+    } else {
+      console.log(JSON.stringify({
+        message: '⏭️ Skipping registration',
+        reason: isExistingUser ? 'user already exists' : (userAge === null || userAge === undefined ? 'age not set' : 'unknown'),
+        mobile: conversationState.userProfile?.mobile,
+        name: conversationState.userProfile?.name
+      }));
+    }
   }
   
   // Handle escalation
@@ -127,6 +289,59 @@ async function processConversationFlow(messageData) {
       escalationReason: result.escalationReason || 'unknown_option',
       step: conversationState.currentStep
     });
+    
+    // Increment escalations count
+    if (isExistingUser && userProfile) {
+      try {
+        await updateUserProfile(USER_PROFILE_TABLE, mobile, {
+          interactions: { escalations: 1 }
+        });
+      } catch (error) {
+        console.error(JSON.stringify({
+          message: '❌ Failed to update escalations count',
+          mobile,
+          error: error.message
+        }));
+      }
+    }
+  }
+  
+  // Update user preferences if menu option was selected
+  if (result.updatePreference && isExistingUser && userProfile) {
+    try {
+      await updateUserProfile(USER_PROFILE_TABLE, mobile, {
+        preferences: result.updatePreference
+      });
+      console.log(JSON.stringify({
+        message: '✅ Updated user preference',
+        mobile,
+        preference: result.updatePreference
+      }));
+    } catch (error) {
+      console.error(JSON.stringify({
+        message: '❌ Failed to update preference',
+        mobile,
+        error: error.message
+      }));
+    }
+  }
+  
+  // Update interactions: increment totalMessages and update lastMessageDate
+  if (isExistingUser && userProfile) {
+    try {
+      await updateUserProfile(USER_PROFILE_TABLE, mobile, {
+        interactions: {
+          totalMessages: 1, // Increment by 1
+          lastMessageDate: now
+        }
+      });
+    } catch (error) {
+      console.error(JSON.stringify({
+        message: '❌ Failed to update interactions',
+        mobile,
+        error: error.message
+      }));
+    }
   }
   
   return {
@@ -141,11 +356,31 @@ async function processConversationFlow(messageData) {
  * @param {object} state - Current conversation state
  * @param {string} messageText - User message text
  * @param {object} messageData - Full message data
+ * @param {boolean} isExistingUser - Whether user exists in database
+ * @param {object} dbUserProfile - User profile from database (if exists)
  * @returns {Promise<object>} Processing result
  */
-async function processStep(state, messageText, messageData) {
+async function processStep(state, messageText, messageData, isExistingUser = false, dbUserProfile = null) {
   const { currentStep, userProfile, stepData } = state;
   const name = userProfile.name || 'there';
+  
+  // If existing user is in collection steps, immediately move to registered
+  if (isExistingUser && dbUserProfile && 
+      ['greeting', 'collect_name', 'collect_dob', 'collect_city'].includes(currentStep)) {
+    return {
+      nextStep: 'registered',
+      flowState: 'registered',
+      userProfile: {
+        name: dbUserProfile.name,
+        dob: dbUserProfile.dob,
+        city: dbUserProfile.city,
+        age: dbUserProfile.age,
+        mobile: state.userProfile.mobile,
+        waNumber: state.userProfile.waNumber
+      },
+      responseMessage: getMessage('welcomeBack', dbUserProfile.name)
+    };
+  }
   
   // Check if message should be escalated (contains help/support keywords)
   if (shouldEscalate(messageText) && currentStep !== 'human_escalation') {
@@ -168,8 +403,26 @@ async function processStep(state, messageText, messageData) {
       message: 'Greeting detected',
       currentStep,
       messageText,
-      isFirstMessage
+      isFirstMessage,
+      isExistingUser
     }));
+    
+    // If existing user sends greeting, show welcome back instead of asking for details
+    if (isExistingUser && dbUserProfile) {
+      return {
+        nextStep: 'registered',
+        flowState: 'registered',
+        userProfile: {
+          name: dbUserProfile.name,
+          dob: dbUserProfile.dob,
+          city: dbUserProfile.city,
+          age: dbUserProfile.age,
+          mobile: state.userProfile.mobile,
+          waNumber: state.userProfile.waNumber
+        },
+        responseMessage: getMessage('welcomeBack', dbUserProfile.name)
+      };
+    }
     
     // Try to extract name from greeting (e.g., "Hello My Name is Mayank")
     // Only extract if the message contains name-related keywords, not simple greetings
@@ -205,7 +458,7 @@ async function processStep(state, messageText, messageData) {
       }
     }
     
-    // If greeting detected, always show full greeting message and reset to greeting step
+    // If greeting detected and not existing user, show full greeting message
     return {
       nextStep: 'greeting',
       flowState: 'collecting',
@@ -228,7 +481,7 @@ async function processStep(state, messageText, messageData) {
   switch (currentStep) {
     case 'pre_check':
     case 'greeting':
-      return processGreeting(messageText, intent);
+      return processGreeting(messageText, intent, isExistingUser, dbUserProfile);
     
     case 'collect_name':
       return processCollectName(messageText, state, intent);
@@ -246,7 +499,7 @@ async function processStep(state, messageText, messageData) {
       return processReferralCollect(messageText, state);
     
     case 'registered':
-      return processRegistered(messageText, state, intent);
+      return processRegistered(messageText, state, intent, isExistingUser, dbUserProfile);
     
     case 'holidays':
       return processHolidays(messageText, state, intent);
@@ -282,8 +535,27 @@ async function processStep(state, messageText, messageData) {
 
 /**
  * Process greeting step
+ * @param {string} messageText - User message
+ * @param {object} intent - Matched intent
+ * @param {boolean} isExistingUser - Whether user exists in database
+ * @param {object} dbUserProfile - User profile from database (if exists)
  */
-function processGreeting(messageText, intent) {
+function processGreeting(messageText, intent, isExistingUser = false, dbUserProfile = null) {
+  // If existing user sends greeting, show welcome back instead
+  if (isExistingUser && dbUserProfile) {
+    return {
+      nextStep: 'registered',
+      flowState: 'registered',
+      userProfile: {
+        name: dbUserProfile.name,
+        dob: dbUserProfile.dob,
+        city: dbUserProfile.city,
+        age: dbUserProfile.age
+      },
+      responseMessage: getMessage('welcomeBack', dbUserProfile.name)
+    };
+  }
+  
   // If user sends greeting (Hello, Hi), show full greeting message
   if (intent.intent === 'greeting' || isGreeting(messageText)) {
     // Only try to extract name if message contains name-related keywords
@@ -471,7 +743,10 @@ async function processCollectCity(messageText, state, intent) {
   const age = state.userProfile.age;
   const name = state.userProfile.name;
   
+  // Always register users after collecting all details (name, DOB, city)
+  // Use ageEligible boolean to identify if age >= 50
   if (age < 50) {
+    // User under 50 - still register them, but show age message
     return {
       nextStep: 'age_under_50',
       flowState: 'collecting',
@@ -480,6 +755,7 @@ async function processCollectCity(messageText, state, intent) {
         ...state.userProfile,
         city
       },
+      shouldRegister: true, // Register all users regardless of age
       responseMessage: getMessage('ageUnder50', name)
     };
   } else {
@@ -533,10 +809,12 @@ function processAgeUnder50(messageText, state, intent) {
       responseMessage: getMessage('referralCollect')
     };
   } else if (intent.intent === 'no' || isNo(messageText)) {
+    // User declined to provide referral - still register them
     return {
       nextStep: 'completed',
       flowState: 'completed',
-      responseMessage: getMessage('referralThankYou')
+      responseMessage: getMessage('referralThankYou'),
+      shouldRegister: true // Register user even if they declined referral
     };
   } else {
     return {
@@ -550,31 +828,71 @@ function processAgeUnder50(messageText, state, intent) {
  * Process referral collection
  */
 function processReferralCollect(messageText, state) {
-  // Simple parsing - in production, use NLP or structured input
-  // For now, just acknowledge and escalate
+  // Extract parent/relative details from message
+  const parentDetails = extractParentDetails(messageText);
+  
+  console.log(JSON.stringify({
+    message: '📋 Processing referral details',
+    originalMessage: messageText,
+    extractedDetails: parentDetails
+  }));
+  
+  // Store parent details in stepData for later registration
+  // Always store referralDetails, even if extraction failed (store raw message)
+  const referralData = parentDetails || {
+    rawMessage: messageText // Store raw message if extraction fails
+  };
+  
+  const stepData = {
+    ...state.stepData,
+    referralDetails: referralData
+  };
+  
+  console.log(JSON.stringify({
+    message: '💾 Storing referral details in stepData',
+    referralDetails: referralData,
+    stepDataKeys: Object.keys(stepData),
+    hasParentName: !!referralData.parentName,
+    hasParentMobile: !!referralData.parentMobile,
+    hasParentCity: !!referralData.parentCity
+  }));
+  
   return {
     nextStep: 'completed',
     flowState: 'completed',
+    stepData: stepData,
     responseMessage: getMessage('referralThankYou'),
     shouldEscalate: true,
-    escalationReason: 'referral_submitted'
+    escalationReason: 'referral_submitted',
+    shouldRegister: true // Register the user (child) who provided referral
   };
 }
 
 /**
  * Process registered user menu selection
  */
-function processRegistered(messageText, state, intent) {
+function processRegistered(messageText, state, intent, isExistingUser = false, dbUserProfile = null) {
+  // If existing user sends a greeting, greet them with their name
+  if (isGreeting(messageText)) {
+    const userName = dbUserProfile?.name || state.userProfile?.name || 'there';
+    return {
+      nextStep: 'registered',
+      flowState: 'registered',
+      responseMessage: getMessage('welcomeBack', userName)
+    };
+  }
+  
   // Use intent matcher to get menu option
   const option = intent.data.option || getMenuOption(messageText);
   
   if (!option) {
     // If no clear option, check if it's a help request
     if (shouldEscalate(messageText)) {
+      const userName = state.userProfile?.name || dbUserProfile?.name || 'there';
       return {
         nextStep: 'human_escalation',
         flowState: 'completed',
-        responseMessage: getMessage('humanEscalation', state.userProfile.name || 'there'),
+        responseMessage: getMessage('humanEscalation', userName),
         shouldEscalate: true,
         escalationReason: 'unknown_option'
       };
@@ -586,26 +904,36 @@ function processRegistered(messageText, state, intent) {
     };
   }
   
+  // Update user preference based on selected option
+  let preferenceUpdate = null;
   switch (option) {
     case 1:
+      preferenceUpdate = { holidays: true };
       return {
         nextStep: 'holidays',
-        responseMessage: getMessage('holidays')
+        responseMessage: getMessage('holidays'),
+        updatePreference: preferenceUpdate
       };
     case 2:
+      preferenceUpdate = { events: true };
       return {
         nextStep: 'events',
-        responseMessage: getMessage('events', state.userProfile.city || 'your city')
+        responseMessage: getMessage('events', state.userProfile.city || 'your city'),
+        updatePreference: preferenceUpdate
       };
     case 3:
+      preferenceUpdate = { health: true };
       return {
         nextStep: 'health',
-        responseMessage: getMessage('health')
+        responseMessage: getMessage('health'),
+        updatePreference: preferenceUpdate
       };
     case 4:
+      preferenceUpdate = { community: true };
       return {
         nextStep: 'community',
-        responseMessage: getMessage('community')
+        responseMessage: getMessage('community'),
+        updatePreference: preferenceUpdate
       };
     default:
       return {
@@ -726,12 +1054,39 @@ async function registerUser(conversationState) {
   const { userProfile } = conversationState;
   const now = Date.now();
   
+  // Validate required fields before saving
+  if (!userProfile.mobile || !userProfile.name || !userProfile.dob || !userProfile.city || !userProfile.age) {
+    console.error(JSON.stringify({
+      message: '❌ Cannot register user - missing required fields',
+      mobile: userProfile.mobile,
+      hasName: !!userProfile.name,
+      hasDOB: !!userProfile.dob,
+      hasCity: !!userProfile.city,
+      hasAge: !!userProfile.age
+    }));
+    throw new Error('Cannot register user: missing required fields');
+  }
+  
+  // Calculate age eligibility
+  const ageEligible = userProfile.age >= 50;
+  
+  // Get parent/referral details if available (for users under 50 who provided referral)
+  const referralDetails = conversationState.stepData?.referralDetails;
+  const savedBy = referralDetails?.parentMobile || null;
+  
   console.log(JSON.stringify({
     message: '📝 Registering user in CRM',
     mobile: userProfile.mobile,
     name: userProfile.name,
     age: userProfile.age,
-    city: userProfile.city
+    ageEligible: ageEligible,
+    city: userProfile.city,
+    dob: userProfile.dob,
+    savedBy: savedBy,
+    hasReferralDetails: !!referralDetails,
+    referralDetails: referralDetails,
+    stepDataKeys: conversationState.stepData ? Object.keys(conversationState.stepData) : [],
+    hasReferralInfo: !!(referralDetails && (referralDetails.parentName || referralDetails.parentMobile || referralDetails.parentCity))
   }));
   
   const profile = {
@@ -740,7 +1095,9 @@ async function registerUser(conversationState) {
     dob: userProfile.dob,
     city: userProfile.city,
     age: userProfile.age,
-    waNumber: userProfile.waNumber,
+    ageEligible: ageEligible, // Boolean: true if age >= 50, false otherwise
+    waNumber: userProfile.waNumber || userProfile.mobile,
+    savedBy: savedBy, // Mobile number of parent/relative who referred them (if applicable)
     registrationDate: now,
     status: 'active',
     source: 'WhatsApp Bot',
@@ -759,13 +1116,42 @@ async function registerUser(conversationState) {
     updatedAt: now
   };
   
-  await saveUserProfile(USER_PROFILE_TABLE, profile);
+  // Add parent details if available
+  if (referralDetails && (referralDetails.parentName || referralDetails.parentMobile || referralDetails.parentCity)) {
+    profile.referralInfo = {
+      parentName: referralDetails.parentName || null,
+      parentMobile: referralDetails.parentMobile || null,
+      parentCity: referralDetails.parentCity || null,
+      rawMessage: referralDetails.rawMessage || null
+    };
+    
+    console.log(JSON.stringify({
+      message: '📝 Including parent/referral details in registration',
+      parentName: referralDetails.parentName,
+      parentMobile: referralDetails.parentMobile,
+      parentCity: referralDetails.parentCity
+    }));
+  }
   
-  console.log(JSON.stringify({
-    message: '✅ User registered successfully',
-    mobile: userProfile.mobile,
-    name: userProfile.name
-  }));
+  try {
+    await saveUserProfile(USER_PROFILE_TABLE, profile);
+    
+    console.log(JSON.stringify({
+      message: '✅ User registered successfully',
+      mobile: userProfile.mobile,
+      name: userProfile.name,
+      table: USER_PROFILE_TABLE
+    }));
+  } catch (error) {
+    console.error(JSON.stringify({
+      message: '❌ Failed to register user',
+      mobile: userProfile.mobile,
+      name: userProfile.name,
+      error: error.message,
+      stack: error.stack
+    }));
+    throw error; // Re-throw to ensure we know registration failed
+  }
 }
 
 module.exports = {

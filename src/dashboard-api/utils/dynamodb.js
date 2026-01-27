@@ -302,38 +302,81 @@ async function getUserEscalations(tableName, mobile, limit = 50) {
  */
 async function getDashboardStats(tables) {
   try {
-    // Get counts (using scans with limit 1 to get approximate counts)
-    const [users, conversations, escalations] = await Promise.all([
-      getAllUserProfiles(tables.userProfile, 1),
-      getAllConversationStates(tables.conversationState, 1),
-      getPendingEscalations(tables.escalation, 1)
+    // Get actual counts using COUNT scans
+    const [usersResult, eligibleUsersResult, conversationsResult, escalationsResult, messagesResult] = await Promise.all([
+      // Count all users with status='active' and profileType='PRIMARY'
+      dynamoClient.send(new ScanCommand({
+        TableName: tables.userProfile,
+        FilterExpression: '#status = :status AND profileType = :profileType',
+        ExpressionAttributeNames: {
+          '#status': 'status'
+        },
+        ExpressionAttributeValues: {
+          ':status': 'active',
+          ':profileType': 'PRIMARY'
+        },
+        Select: 'COUNT'
+      })),
+      // Count eligible users (ageEligible = true) - users with age >= 50
+      dynamoClient.send(new ScanCommand({
+        TableName: tables.userProfile,
+        FilterExpression: '#status = :status AND profileType = :profileType AND ageEligible = :ageEligible',
+        ExpressionAttributeNames: {
+          '#status': 'status'
+        },
+        ExpressionAttributeValues: {
+          ':status': 'active',
+          ':profileType': 'PRIMARY',
+          ':ageEligible': true
+        },
+        Select: 'COUNT'
+      })),
+      // Count all conversation states
+      dynamoClient.send(new ScanCommand({
+        TableName: tables.conversationState,
+        Select: 'COUNT'
+      })),
+      // Count pending escalations
+      dynamoClient.send(new QueryCommand({
+        TableName: tables.escalation,
+        IndexName: 'status-index',
+        KeyConditionExpression: '#status = :status',
+        ExpressionAttributeNames: {
+          '#status': 'status'
+        },
+        ExpressionAttributeValues: {
+          ':status': 'pending'
+        },
+        Select: 'COUNT'
+      })),
+      // Count messages in last 24 hours
+      dynamoClient.send(new ScanCommand({
+        TableName: tables.messageLog,
+        FilterExpression: '#timestamp > :oneDayAgo',
+        ExpressionAttributeNames: {
+          '#timestamp': 'timestamp'
+        },
+        ExpressionAttributeValues: {
+          ':oneDayAgo': Date.now() - (24 * 60 * 60 * 1000)
+        },
+        Select: 'COUNT'
+      }))
     ]);
     
-    // For messages, we'll use a scan with filter for last 24 hours
-    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-    const scanCommand = new ScanCommand({
-      TableName: tables.messageLog,
-      FilterExpression: '#timestamp > :oneDayAgo',
-      ExpressionAttributeNames: {
-        '#timestamp': 'timestamp'
-      },
-      ExpressionAttributeValues: {
-        ':oneDayAgo': oneDayAgo
-      },
-      Select: 'COUNT'
-    });
-    
-    const messagesResult = await dynamoClient.send(scanCommand);
-    const messagesLast24h = messagesResult.Count || 0;
-    
     return {
-      totalUsers: users.count,
-      activeConversations: conversations.count,
-      pendingEscalations: escalations.count,
-      messagesLast24h: messagesLast24h,
+      totalUsers: usersResult.Count || 0,
+      eligibleUsers: eligibleUsersResult.Count || 0, // Users with age >= 50
+      activeConversations: conversationsResult.Count || 0,
+      pendingEscalations: escalationsResult.Count || 0,
+      messagesLast24h: messagesResult.Count || 0,
       timestamp: Date.now()
     };
   } catch (error) {
+    console.error(JSON.stringify({
+      message: 'Error getting dashboard stats',
+      error: error.message,
+      stack: error.stack
+    }));
     throw new Error(`Error getting dashboard stats: ${error.message}`);
   }
 }

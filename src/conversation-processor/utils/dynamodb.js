@@ -261,9 +261,133 @@ async function createEscalation(tableName, escalation) {
   }
 }
 
+/**
+ * Update user preferences and interactions
+ * @param {string} tableName - Table name
+ * @param {string} mobile - Mobile number
+ * @param {object} updates - Updates object with preferences and/or interactions
+ * @returns {Promise<void>}
+ */
+async function updateUserProfile(tableName, mobile, updates) {
+  try {
+    const now = Date.now();
+    
+    // Get existing profile first
+    const existingProfile = await getUserProfile(tableName, mobile);
+    
+    if (!existingProfile) {
+      console.warn(JSON.stringify({
+        message: '⚠️ Cannot update profile - user does not exist',
+        mobile
+      }));
+      return;
+    }
+    
+    // Merge preferences if provided
+    let updatedPreferences = existingProfile.preferences || {
+      holidays: false,
+      events: false,
+      health: false,
+      community: false
+    };
+    
+    if (updates.preferences) {
+      updatedPreferences = {
+        ...updatedPreferences,
+        ...updates.preferences
+      };
+    }
+    
+    // Merge interactions if provided
+    let updatedInteractions = existingProfile.interactions || {
+      totalMessages: 0,
+      lastMessageDate: now,
+      escalations: 0
+    };
+    
+    if (updates.interactions) {
+      if (updates.interactions.totalMessages !== undefined) {
+        updatedInteractions.totalMessages = (updatedInteractions.totalMessages || 0) + updates.interactions.totalMessages;
+      }
+      
+      if (updates.interactions.lastMessageDate !== undefined) {
+        updatedInteractions.lastMessageDate = updates.interactions.lastMessageDate;
+      }
+      
+      if (updates.interactions.escalations !== undefined) {
+        updatedInteractions.escalations = (updatedInteractions.escalations || 0) + updates.interactions.escalations;
+      }
+    }
+    
+    // Build update expression
+    const updateExpressions = [];
+    const expressionAttributeNames = {};
+    const expressionAttributeValues = {};
+    
+    // Update preferences if changed
+    if (updates.preferences) {
+      expressionAttributeNames['#preferences'] = 'preferences';
+      expressionAttributeValues[':preferences'] = updatedPreferences;
+      updateExpressions.push('#preferences = :preferences');
+    }
+    
+    // Update interactions if changed
+    if (updates.interactions) {
+      expressionAttributeNames['#interactions'] = 'interactions';
+      expressionAttributeValues[':interactions'] = updatedInteractions;
+      updateExpressions.push('#interactions = :interactions');
+    }
+    
+    // Always update updatedAt
+    expressionAttributeNames['#updatedAt'] = 'updatedAt';
+    expressionAttributeValues[':updatedAt'] = now;
+    updateExpressions.push('#updatedAt = :updatedAt');
+    
+    if (updateExpressions.length === 0) {
+      console.warn(JSON.stringify({
+        message: '⚠️ No updates provided',
+        mobile
+      }));
+      return;
+    }
+    
+    const command = new UpdateCommand({
+      TableName: tableName,
+      Key: {
+        mobile: mobile,
+        profileType: 'PRIMARY'
+      },
+      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues
+    });
+    
+    await dynamoClient.send(command);
+    
+    console.log(JSON.stringify({
+      message: '✅ User profile updated successfully',
+      table: tableName,
+      mobile,
+      updates: Object.keys(updates),
+      preferences: updatedPreferences,
+      interactions: updatedInteractions
+    }));
+  } catch (error) {
+    console.error(JSON.stringify({
+      message: '❌ Error updating user profile',
+      table: tableName,
+      mobile,
+      error: error.message,
+      stack: error.stack
+    }));
+    throw error;
+  }
+}
+
 module.exports = {
   getUserProfile,
   saveUserProfile,
+  updateUserProfile,
   getLatestConversationState,
   saveConversationState,
   saveMessageLog,

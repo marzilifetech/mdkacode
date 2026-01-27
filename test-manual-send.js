@@ -7,8 +7,8 @@ const https = require('https');
 const querystring = require('querystring');
 
 // Gupshup credentials
-const GUPSHUP_USER_ID = '2000261475';
-const GUPSHUP_PASSWORD = 'Op9uy64zU';
+const GUPSHUP_USER_ID = '2000262614';
+const GUPSHUP_PASSWORD = 'xk5sAZhq';
 const MOBILE = '919936142128'; // Replace with your test number
 const MESSAGE = 'Hello! This is a test message from Marzi Bot.';
 
@@ -25,7 +25,7 @@ const formDataParams = {
   send_to: MOBILE,
   format: 'json',
   msg: MESSAGE,
-  isHSM: 'false',
+  isHSM: 'true',
   msg_type: 'TEXT'
 };
 

@@ -14,6 +14,23 @@ const WHATSAPP_TEMPLATE_IS_INTERACTIVE = process.env.WHATSAPP_TEMPLATE_IS_INTERA
  * @param {string} message - Message text
  * @returns {object} Object with variables array and remaining message
  */
+/**
+ * Check if message contains emojis or special Unicode characters
+ * @param {string} message - Message text
+ * @returns {boolean} True if message contains emojis or special Unicode
+ */
+function containsUnicode(message) {
+  if (!message || typeof message !== 'string') return false;
+  
+  // Check for emojis (Unicode ranges for emojis)
+  const emojiRegex = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|[\u{200D}]|[\u{203C}-\u{3299}]|[\u{FE00}-\u{FE0F}]/u;
+  
+  // Check for special characters beyond basic ASCII
+  const hasNonASCII = /[^\x00-\x7F]/.test(message);
+  
+  return emojiRegex.test(message) || hasNonASCII;
+}
+
 function extractTemplateVariables(message) {
   // Check if message contains template variable placeholders
   const placeholderRegex = /\{\{(\d+)\}\}/g;
@@ -117,15 +134,41 @@ async function sendMessage(userId, password, mobile, message, options = {}) {
 
     // CONVERSATIONAL MODE: Free text messages (user-initiated conversations)
     // No template required - WhatsApp allows free text in 2-way conversations
+    // IMPORTANT: The provided API doc only covers template-based messaging
+    // For conversational messages, we use minimal parameters
+    // Message must be sent within 24 hours of user's last message
     if (isConversational && !templateId) {
       formDataParams.msg = message;
-      formDataParams.isHSM = 'false';
+      formDataParams.isHSM = 'true';
+      // Note: msg_type might not be needed for conversational messages
+      // Some implementations work without it, but keeping it for compatibility
       formDataParams.msg_type = 'TEXT';
+      
+      // CRITICAL: Set data_encoding for emojis and special characters
+      // According to Gupshup API: default is "text" (Plain English)
+      // For emojis/special characters, must use "Unicode_text"
+      if (containsUnicode(message)) {
+        formDataParams.data_encoding = 'Unicode_text';
+        console.log(JSON.stringify({
+          message: 'Message contains emojis/Unicode - using Unicode_text encoding',
+          mobile,
+          hasEmojis: true
+        }));
+      } else {
+        formDataParams.data_encoding = 'text';
+      }
+      
+      // Explicitly ensure these are NOT set for conversational messages
+      delete formDataParams.whatsAppTemplateId;
+      delete formDataParams.isTemplate;
       
       console.log(JSON.stringify({
         message: 'Sending conversational message (free text, no template)',
         mobile,
-        messageLength: message.length
+        messageLength: message.length,
+        dataEncoding: formDataParams.data_encoding,
+        parameters: Object.keys(formDataParams),
+        note: 'Message must be sent within 24 hours of user\'s last message. If not delivered, check Gupshup account configuration for conversational messaging.'
       }));
     }
     // TEMPLATE MODE: Template-based messaging (business-initiated notifications)
@@ -168,17 +211,38 @@ async function sendMessage(userId, password, mobile, message, options = {}) {
         });
       }
       
+      // Set data_encoding for emojis and special characters in template messages
+      // Check message text and any variables for Unicode content
+      const hasUnicodeInMessage = containsUnicode(message);
+      const hasUnicodeInVars = Object.values(templateVars).some(val => 
+        typeof val === 'string' && containsUnicode(val)
+      );
+      const hasUnicodeInHeader = options.header && containsUnicode(options.header);
+      const hasUnicodeInFooter = options.footer && containsUnicode(options.footer);
+      
+      if (hasUnicodeInMessage || hasUnicodeInVars || hasUnicodeInHeader || hasUnicodeInFooter) {
+        formDataParams.data_encoding = 'Unicode_text';
+        console.log(JSON.stringify({
+          message: 'Template message contains emojis/Unicode - using Unicode_text encoding',
+          mobile,
+          hasEmojis: true
+        }));
+      } else {
+        formDataParams.data_encoding = 'text';
+      }
+      
       console.log(JSON.stringify({
         message: 'Sending template-based message',
         mobile,
         templateId,
-        variableCount: Object.keys(templateVars).length
+        variableCount: Object.keys(templateVars).length,
+        dataEncoding: formDataParams.data_encoding
       }));
     }
     // Fallback: conversational mode if template ID not provided
     else {
       formDataParams.msg = message;
-      formDataParams.isHSM = 'false';
+      formDataParams.isHSM = 'true';
       formDataParams.msg_type = 'TEXT';
       
       console.log(JSON.stringify({
@@ -239,15 +303,38 @@ async function sendMessage(userId, password, mobile, message, options = {}) {
             // Gupshup API returns response in different formats
             // Check various success indicators
             if (parsed.response && parsed.response.status === 'success') {
-              console.log(JSON.stringify({
-                message: '✅ Gupshup API Success (response.status)',
-                mobile: mobile,
-                messageId: parsed.response.id || parsed.response.messageId
-              }));
+              // Check details field for any warnings or additional info
+              const details = parsed.response.details || '';
+              const hasWarnings = details && details.toLowerCase().includes('warning');
+              
+              if (details && !hasWarnings) {
+                console.log(JSON.stringify({
+                  message: '✅ Gupshup API Success (response.status)',
+                  mobile: mobile,
+                  messageId: parsed.response.id || parsed.response.messageId,
+                  details: details
+                }));
+              } else if (hasWarnings) {
+                console.warn(JSON.stringify({
+                  message: '⚠️ Gupshup API Success with Warnings',
+                  mobile: mobile,
+                  messageId: parsed.response.id || parsed.response.messageId,
+                  details: details,
+                  warning: 'Message accepted but may have delivery issues'
+                }));
+              } else {
+                console.log(JSON.stringify({
+                  message: '✅ Gupshup API Success (response.status)',
+                  mobile: mobile,
+                  messageId: parsed.response.id || parsed.response.messageId
+                }));
+              }
+              
               resolve({ 
                 success: true, 
                 data: parsed,
-                messageId: parsed.response.id || parsed.response.messageId || null
+                messageId: parsed.response.id || parsed.response.messageId || null,
+                details: details
               });
             } else if (parsed.status === 'success' || parsed.status === 'submitted') {
               console.log(JSON.stringify({
