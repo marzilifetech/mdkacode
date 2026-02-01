@@ -39,6 +39,7 @@ let authHandler;
 let paymentHandler;
 let dashboardHandler;
 let webhookHandler;
+let antakshariHandler;
 
 function getAuthHandler() {
   if (!authHandler) authHandler = require(path.join(PROJECT_ROOT, 'src/auth-api/app.js')).handler;
@@ -55,6 +56,10 @@ function getDashboardHandler() {
 function getWebhookHandler() {
   if (!webhookHandler) webhookHandler = require(path.join(PROJECT_ROOT, 'src/inbound-webhook/app.js')).handler;
   return webhookHandler;
+}
+function getAntakshariHandler() {
+  if (!antakshariHandler) antakshariHandler = require(path.join(PROJECT_ROOT, 'src/antakshari-api/app.js')).handler;
+  return antakshariHandler;
 }
 
 function parseQuery(urlStr) {
@@ -88,6 +93,7 @@ function route(pathname, method) {
   if (pathname.startsWith('/auth')) return 'auth';
   if (pathname.startsWith('/payment')) return 'payment';
   if (pathname.startsWith('/dashboard')) return 'dashboard';
+  if (pathname.startsWith('/antakshari')) return 'antakshari';
   if (pathname === '/webhook/inbound') return 'webhook';
   return null;
 }
@@ -109,6 +115,7 @@ const server = http.createServer(async (req, res) => {
     if (routeType === 'auth') result = await getAuthHandler()(event);
     else if (routeType === 'payment') result = await getPaymentHandler()(event);
     else if (routeType === 'dashboard') result = await getDashboardHandler()(event);
+    else if (routeType === 'antakshari') result = await getAntakshariHandler()(event);
     else if (routeType === 'webhook') result = await getWebhookHandler()(event);
     else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -132,9 +139,10 @@ server.listen(PORT, () => {
   console.log('');
   console.log('Local API server (no Docker)');
   console.log('Base URL: http://localhost:' + PORT);
-  console.log('Auth:    http://localhost:' + PORT + '/auth/otp/request');
-  console.log('Payment: http://localhost:' + PORT + '/payment/orders');
-  console.log('Webhook: http://localhost:' + PORT + '/webhook/inbound');
+  console.log('Auth:       http://localhost:' + PORT + '/auth/otp/request');
+  console.log('Payment:    http://localhost:' + PORT + '/payment/orders');
+  console.log('Antakshari: http://localhost:' + PORT + '/antakshari/team');
+  console.log('Webhook:    http://localhost:' + PORT + '/webhook/inbound');
   console.log('');
   console.log('Press Ctrl+C to stop');
   console.log('');

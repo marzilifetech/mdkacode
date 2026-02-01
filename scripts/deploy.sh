@@ -11,12 +11,15 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Set AWS credentials from project folder
-export AWS_SHARED_CREDENTIALS_FILE="$(pwd)/.aws/credentials"
-export AWS_CONFIG_FILE="$(pwd)/.aws/config"
+# Set AWS credentials from project folder (if present)
+if [ -d "$(pwd)/.aws" ]; then
+  export AWS_SHARED_CREDENTIALS_FILE="$(pwd)/.aws/credentials"
+  export AWS_CONFIG_FILE="$(pwd)/.aws/config"
+fi
 
-# Get region from config
-REGION=$(aws configure get region)
+# Get region: env AWS_REGION, or project config, or default ap-south-1
+REGION=${AWS_REGION:-$(aws configure get region 2>/dev/null || true)}
+REGION=${REGION:-ap-south-1}
 STACK_NAME=${1:-whatsapp-bot-stack}
 
 echo -e "${GREEN}🚀 Deploying WhatsApp Bot to AWS${NC}"

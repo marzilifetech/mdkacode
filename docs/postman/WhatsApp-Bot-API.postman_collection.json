@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "WhatsApp Bot API",
-    "description": "Auth API (OTP + JWT), Dashboard API, Payment API (Razorpay). Use Postman environments: Local (base_url = http://localhost:3001) or Prod (base_url = your API Gateway URL).",
+    "description": "Auth API (OTP + JWT), Dashboard API, Payment API (Razorpay), Antakshari API (team, profile, members, link-order). Use Postman environments: Local (base_url = http://localhost:3001) or Prod (base_url = your API Gateway URL).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -40,6 +40,14 @@
     {
       "key": "razorpay_signature",
       "value": ""
+    },
+    {
+      "key": "team_id",
+      "value": ""
+    },
+    {
+      "key": "antakshari_ref",
+      "value": "username_antakshari"
     }
   ],
   "item": [
@@ -345,6 +353,156 @@
               "path": ["payment", "webhook"]
             },
             "description": "Razorpay calls this; no JWT. For manual testing set X-Razorpay-Signature (HMAC of body with RAZORPAY_WEBHOOK_SECRET)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Antakshari API",
+      "description": "Team registration, profile, members (5 per team), link payment order. All require Authorization: Bearer {{access_token}}. Flow: Create Team → Get/Update Profile → Add Members → Create Order (Payment API) → Link Order → Get Teams/Users.",
+      "item": [
+        {
+          "name": "Create Team",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.teamId) { pm.collectionVariables.set('team_id', json.teamId); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"teamName\": \"My Team\",\n  \"ref\": \"{{antakshari_ref}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/antakshari/team",
+              "host": ["{{base_url}}"],
+              "path": ["antakshari", "team"]
+            },
+            "description": "Create a team. Returns teamId (saved to collection variable for Add Members / Link Order)."
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/antakshari/profile",
+              "host": ["{{base_url}}"],
+              "path": ["antakshari", "profile"]
+            },
+            "description": "Get owner name and dob from UserProfile (mobile from JWT). Returns name, dob (dd/mm/yyyy or null). 404 if not found."
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Owner Name\",\n  \"dob\": \"02/09/2006\",\n  \"ref\": \"{{antakshari_ref}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/antakshari/profile",
+              "host": ["{{base_url}}"],
+              "path": ["antakshari", "profile"]
+            },
+            "description": "Create or update owner in UserProfile (mobile from JWT). name required; dob optional (dd/mm/yyyy); ref optional. DOB is saved every time when provided."
+          }
+        },
+        {
+          "name": "Add Members",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"members\": [\n    { \"name\": \"Member 1\", \"phone\": \"9876543210\", \"dob\": \"01/01/2000\" },\n    { \"name\": \"Member 2\", \"phone\": \"9876543211\", \"dob\": \"02/02/2000\" },\n    { \"name\": \"Member 3\", \"phone\": \"9876543212\", \"dob\": \"03/03/2000\" },\n    { \"name\": \"Member 4\", \"phone\": \"9876543213\", \"dob\": \"04/04/2000\" },\n    { \"name\": \"Member 5\", \"phone\": \"9876543214\", \"dob\": \"05/05/2000\" }\n  ],\n  \"ref\": \"{{antakshari_ref}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/antakshari/team/{{team_id}}/members",
+              "host": ["{{base_url}}"],
+              "path": ["antakshari", "team", "{{team_id}}", "members"]
+            },
+            "description": "Add exactly 5 members. DOB format: dd/mm/yyyy. Phone: 10 digits or 12 with country code. Uses team_id from Create Team."
+          }
+        },
+        {
+          "name": "Link Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"{{razorpay_order_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/antakshari/team/{{team_id}}/link-order",
+              "host": ["{{base_url}}"],
+              "path": ["antakshari", "team", "{{team_id}}", "link-order"]
+            },
+            "description": "Link Razorpay order (from Payment API Create Order) to team. Set razorpay_order_id in collection variables or body."
+          }
+        },
+        {
+          "name": "Get Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/antakshari/users",
+              "host": ["{{base_url}}"],
+              "path": ["antakshari", "users"],
+              "query": [
+                { "key": "ref", "value": "{{antakshari_ref}}", "disabled": true },
+                { "key": "teamId", "value": "{{team_id}}", "disabled": true }
+              ]
+            },
+            "description": "List users (members + profile) with team info and payment status. Optional query: ref, teamId."
+          }
+        },
+        {
+          "name": "Get Teams",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/antakshari/teams",
+              "host": ["{{base_url}}"],
+              "path": ["antakshari", "teams"],
+              "query": [
+                { "key": "ref", "value": "{{antakshari_ref}}", "disabled": true }
+              ]
+            },
+            "description": "List teams (with members and payment status). Optional query: ref."
           }
         }
       ]

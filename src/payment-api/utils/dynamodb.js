@@ -129,6 +129,10 @@ async function updatePaymentOrder(orderId, updates) {
     setParts.push('statusHistory = :statusHistory');
     values[':statusHistory'] = updates.statusHistory;
   }
+  if (updates.whatsappConfirmationSentAt != null) {
+    setParts.push('whatsappConfirmationSentAt = :whatsappConfirmationSentAt');
+    values[':whatsappConfirmationSentAt'] = updates.whatsappConfirmationSentAt;
+  }
 
   await dynamoClient.send(
     new UpdateCommand({

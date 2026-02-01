@@ -18,6 +18,7 @@ const {
   verifyPaymentSignature,
   verifyWebhookSignature
 } = require('./utils/razorpay');
+const { sendAntakshariConfirmationTemplate } = require('./utils/gupshup');
 
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || '';
 const RAZORPAY_BUSINESS_NAME = process.env.RAZORPAY_BUSINESS_NAME || 'Merchant';
@@ -554,6 +555,33 @@ async function handleWebhook(event) {
         capturedAt: now,
         statusHistory
       });
+
+      // Send one WhatsApp confirmation for Antakshari (team name + amount confirmed)
+      const templateId = process.env.ANTAKSHARI_CONFIRMATION_TEMPLATE_ID;
+      if (
+        templateId &&
+        order.antakshariTeamName &&
+        !order.whatsappConfirmationSentAt &&
+        order.mobile
+      ) {
+        try {
+          const amountStr = order.amountPaise != null ? `₹${(order.amountPaise / 100).toFixed(0)}` : '₹0';
+          await sendAntakshariConfirmationTemplate(
+            order.mobile,
+            templateId,
+            order.antakshariTeamName,
+            amountStr
+          );
+          await updatePaymentOrder(orderId, { whatsappConfirmationSentAt: now });
+        } catch (err) {
+          console.error(JSON.stringify({
+            message: 'WhatsApp Antakshari confirmation send failed',
+            orderId,
+            mobile: order.mobile,
+            error: err.message
+          }));
+        }
+      }
     }
   } else if (eventName === 'payment.failed' && payload.payload?.payment?.entity) {
     const payment = payload.payload.payment.entity;

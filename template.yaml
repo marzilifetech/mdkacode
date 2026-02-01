@@ -267,6 +267,49 @@ Resources:
         - AttributeName: configKey
           KeyType: HASH
 
+  # DynamoDB Table for Antakshari Teams
+  AntakshariTeam:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: AntakshariTeam
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: teamId
+          AttributeType: S
+        - AttributeName: ownerMobile
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: N
+      KeySchema:
+        - AttributeName: teamId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ownerMobile-createdAt-index
+          KeySchema:
+            - AttributeName: ownerMobile
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # DynamoDB Table for Antakshari Team Members
+  AntakshariMember:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: AntakshariMember
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: teamId
+          AttributeType: S
+        - AttributeName: memberIndex
+          AttributeType: S
+      KeySchema:
+        - AttributeName: teamId
+          KeyType: HASH
+        - AttributeName: memberIndex
+          KeyType: RANGE
+
   # SQS Queue for Inbound Messages
   InboundMessageQueue:
     Type: AWS::SQS::Queue
@@ -471,6 +514,9 @@ Resources:
           RAZORPAY_WEBHOOK_SECRET: "PhYERkRJUCViSWFk3NuerYQP"
           RAZORPAY_BUSINESS_NAME: "Merchant"
           RAZORPAY_TEST_MODE: "true"
+          GUPSHUP_USER_ID: "2000261475"
+          GUPSHUP_PASSWORD: "Op9uy64zU"
+          ANTAKSHARI_CONFIRMATION_TEMPLATE_ID: "f6c74b47-bdea-4f09-ac08-a99b486e6a5a"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PaymentProduct
@@ -533,6 +579,77 @@ Resources:
           Properties:
             Path: /payment/webhook
             Method: post
+            RestApiId: !Ref ApiGateway
+
+  # Lambda Function for Antakshari API (team, profile, members, link-order, list)
+  AntakshariAPI:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AntakshariAPI
+      CodeUri: src/antakshari-api/
+      Handler: app.handler
+      Runtime: nodejs18.x
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          ANTAKSHARI_TEAM_TABLE_NAME: !Ref AntakshariTeam
+          ANTAKSHARI_MEMBER_TABLE_NAME: !Ref AntakshariMember
+          USER_PROFILE_TABLE_NAME: !Ref UserProfile
+          PAYMENT_ORDER_TABLE_NAME: !Ref PaymentOrder
+          JWT_ACCESS_SECRET: "change-me-in-production"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AntakshariTeam
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AntakshariMember
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserProfile
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentOrder
+        - CloudWatchLogsFullAccess
+      Events:
+        AntakshariTeamPost:
+          Type: Api
+          Properties:
+            Path: /antakshari/team
+            Method: post
+            RestApiId: !Ref ApiGateway
+        AntakshariProfileGet:
+          Type: Api
+          Properties:
+            Path: /antakshari/profile
+            Method: get
+            RestApiId: !Ref ApiGateway
+        AntakshariProfilePost:
+          Type: Api
+          Properties:
+            Path: /antakshari/profile
+            Method: post
+            RestApiId: !Ref ApiGateway
+        AntakshariTeamMembersPost:
+          Type: Api
+          Properties:
+            Path: /antakshari/team/{teamId}/members
+            Method: post
+            RestApiId: !Ref ApiGateway
+        AntakshariTeamLinkOrderPost:
+          Type: Api
+          Properties:
+            Path: /antakshari/team/{teamId}/link-order
+            Method: post
+            RestApiId: !Ref ApiGateway
+        AntakshariUsersGet:
+          Type: Api
+          Properties:
+            Path: /antakshari/users
+            Method: get
+            RestApiId: !Ref ApiGateway
+        AntakshariTeamsGet:
+          Type: Api
+          Properties:
+            Path: /antakshari/teams
+            Method: get
             RestApiId: !Ref ApiGateway
 
   # API Gateway REST API
