@@ -1,0 +1,166 @@
+{
+  "info": {
+    "name": "WhatsApp Bot API",
+    "description": "Auth API (OTP + JWT) and Dashboard API. Set `base_url` in collection variables to your API Gateway base URL.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://jmv0oz53r4.execute-api.ap-south-1.amazonaws.com/prod"
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "refresh_token",
+      "value": ""
+    },
+    {
+      "key": "mobile",
+      "value": "919876543210"
+    },
+    {
+      "key": "otp_code",
+      "value": "123456"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth API",
+      "description": "JWT + OTP via WhatsApp. Request OTP → Verify OTP → Use access/refresh tokens.",
+      "item": [
+        {
+          "name": "Request OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"{{mobile}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/request",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "request"]
+            },
+            "description": "Sends 6-digit OTP to the mobile number via WhatsApp (template: 4a4ac078-72a2-4f3d-b8cf-c0e0c3359d20). Rate limit: 30 seconds per mobile."
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.accessToken) { pm.collectionVariables.set('access_token', json.accessToken); }",
+                  "if (json.refreshToken) { pm.collectionVariables.set('refresh_token', json.refreshToken); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"{{mobile}}\",\n  \"code\": \"{{otp_code}}\",\n  \"platform\": \"web\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/otp/verify",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "otp", "verify"]
+            },
+            "description": "Verifies OTP and returns accessToken + refreshToken. Saves tokens to collection variables for Refresh and Dashboard requests."
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh"]
+            },
+            "description": "Returns new access and refresh tokens. Uses refresh_token from collection variables (set by Verify OTP)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard API",
+      "description": "Dashboard endpoints (optional: protect with JWT authorizer). Use access_token in Authorization header.",
+      "item": [
+        {
+          "name": "Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/stats",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "stats"]
+            },
+            "description": "GET dashboard statistics (totalUsers, eligibleUsers, etc.)."
+          }
+        },
+        {
+          "name": "Users (list)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/users?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "users"],
+              "query": [
+                { "key": "limit", "value": "50" },
+                { "key": "lastKey", "value": "", "disabled": true }
+              ]
+            },
+            "description": "GET paginated users. Optional: lastKey for next page."
+          }
+        },
+        {
+          "name": "Users (by mobile)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/users?mobile={{mobile}}",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "users"],
+              "query": [{ "key": "mobile", "value": "{{mobile}}" }]
+            },
+            "description": "GET single user profile by mobile."
+          }
+        }
+      ]
+    }
+  ]
+}

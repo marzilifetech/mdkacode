@@ -144,6 +144,54 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  # DynamoDB Table for Auth Users (SSO)
+  AuthUser:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: AuthUser
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: mobile
+          AttributeType: S
+        - AttributeName: platform
+          AttributeType: S
+      KeySchema:
+        - AttributeName: mobile
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: platform-index
+          KeySchema:
+            - AttributeName: platform
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # DynamoDB Table for OTP Attempts (rate limit and audit)
+  OTPAttempt:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: OTPAttempt
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: attemptId
+          AttributeType: S
+        - AttributeName: mobile
+          AttributeType: S
+        - AttributeName: requestedAt
+          AttributeType: N
+      KeySchema:
+        - AttributeName: attemptId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: mobile-requestedAt-index
+          KeySchema:
+            - AttributeName: mobile
+              KeyType: HASH
+            - AttributeName: requestedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
   # SQS Queue for Inbound Messages
   InboundMessageQueue:
     Type: AWS::SQS::Queue
@@ -280,6 +328,53 @@ Resources:
             Method: get
             RestApiId: !Ref ApiGateway
 
+  # Lambda Function for Auth API (JWT + OTP via WhatsApp)
+  AuthAPI:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AuthAPI
+      CodeUri: src/auth-api/
+      Handler: app.handler
+      Runtime: nodejs18.x
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          AUTH_USER_TABLE_NAME: !Ref AuthUser
+          OTP_ATTEMPT_TABLE_NAME: !Ref OTPAttempt
+          GUPSHUP_USER_ID: "2000261475"   # Template/OTP only (conversational uses different credentials)
+          GUPSHUP_PASSWORD: "Op9uy64zU"
+          JWT_ACCESS_SECRET: "change-me-in-production"
+          JWT_REFRESH_SECRET: "change-me-refresh-in-production"
+          JWT_ACCESS_EXPIRY: "1h"
+          JWT_REFRESH_EXPIRY: "7d"
+          USER_AUTH_TEMPLATE_ID: "1440838324490390"  # Or META Template ID from Gupshup Console (Templates -> info icon)
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthUser
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OTPAttempt
+        - CloudWatchLogsFullAccess
+      Events:
+        AuthOtpRequest:
+          Type: Api
+          Properties:
+            Path: /auth/otp/request
+            Method: post
+            RestApiId: !Ref ApiGateway
+        AuthOtpVerify:
+          Type: Api
+          Properties:
+            Path: /auth/otp/verify
+            Method: post
+            RestApiId: !Ref ApiGateway
+        AuthRefresh:
+          Type: Api
+          Properties:
+            Path: /auth/refresh
+            Method: post
+            RestApiId: !Ref ApiGateway
+
   # API Gateway REST API
   ApiGateway:
     Type: AWS::Serverless::Api
@@ -303,6 +398,12 @@ Outputs:
     Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod'
     Export:
       Name: !Sub '${AWS::StackName}-DashboardApiUrl'
+  
+  AuthApiUrl:
+    Description: API Gateway base URL for auth API (OTP + JWT)
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    Export:
+      Name: !Sub '${AWS::StackName}-AuthApiUrl'
   
   InboundMessageQueueUrl:
     Description: SQS Queue URL for inbound messages
