@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "WhatsApp Bot API",
-    "description": "Auth API (OTP + JWT) and Dashboard API. Set `base_url` in collection variables to your API Gateway base URL.",
+    "description": "Auth API (OTP + JWT), Dashboard API, Payment API (Razorpay). Use Postman environments: Local (base_url = http://localhost:3001) or Prod (base_url = your API Gateway URL).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -24,6 +24,22 @@
     {
       "key": "otp_code",
       "value": "123456"
+    },
+    {
+      "key": "product_id",
+      "value": ""
+    },
+    {
+      "key": "razorpay_order_id",
+      "value": ""
+    },
+    {
+      "key": "razorpay_payment_id",
+      "value": ""
+    },
+    {
+      "key": "razorpay_signature",
+      "value": ""
     }
   ],
   "item": [
@@ -158,6 +174,177 @@
               "query": [{ "key": "mobile", "value": "{{mobile}}" }]
             },
             "description": "GET single user profile by mobile."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payment API",
+      "description": "Razorpay payment: products, orders, verify. All except Webhook require Authorization: Bearer {{access_token}}. Use Local env (port 3001) or Prod env.",
+      "item": [
+        {
+          "name": "Register Product",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Product\",\n  \"amount\": 500,\n  \"gstPercent\": 18\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/products",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "products"]
+            },
+            "description": "Register a product (name, amount in INR, gstPercent). Returns productId, totalPaise. Save product_id for Update / Create Order."
+          }
+        },
+        {
+          "name": "List Products",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/payment/products",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "products"]
+            },
+            "description": "List all registered products."
+          }
+        },
+        {
+          "name": "Update Product",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Product\",\n  \"amount\": 600,\n  \"gstPercent\": 18\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/products/{{product_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "products", "{{product_id}}"]
+            },
+            "description": "Update product by product_id (set in collection variables or from Register Product response)."
+          }
+        },
+        {
+          "name": "Get Payment Config",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/payment/config",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "config"]
+            },
+            "description": "Get payment configuration (enabled methods, notes)."
+          }
+        },
+        {
+          "name": "Update Payment Config",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabledMethods\": [\"card\", \"upi\"],\n  \"notes\": \"Test config\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/config",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "config"]
+            },
+            "description": "Update payment configuration."
+          }
+        },
+        {
+          "name": "Create Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"{{product_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/orders",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "orders"]
+            },
+            "description": "Create Razorpay order by productId (or productName). Returns order_id, amount, key for Checkout. Use order_id in client Razorpay Checkout."
+          }
+        },
+        {
+          "name": "Verify Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpay_order_id\": \"{{razorpay_order_id}}\",\n  \"razorpay_payment_id\": \"{{razorpay_payment_id}}\",\n  \"razorpay_signature\": \"{{razorpay_signature}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/verify",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "verify"]
+            },
+            "description": "After Checkout success, send razorpay_order_id, razorpay_payment_id, razorpay_signature from client. Set these in collection variables or paste in body."
+          }
+        },
+        {
+          "name": "List Payments",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/payment/payments",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "payments"]
+            },
+            "description": "List payments for the authenticated user."
+          }
+        },
+        {
+          "name": "Webhook (Razorpay)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Razorpay-Signature", "value": "" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"payment.captured\",\n  \"payload\": { \"payment\": { \"entity\": { \"id\": \"pay_xxx\", \"order_id\": \"order_xxx\", \"method\": \"upi\" } } }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/webhook",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "webhook"]
+            },
+            "description": "Razorpay calls this; no JWT. For manual testing set X-Razorpay-Signature (HMAC of body with RAZORPAY_WEBHOOK_SECRET)."
           }
         }
       ]

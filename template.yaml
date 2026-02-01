@@ -192,6 +192,81 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  # DynamoDB Table for Payment Products (register product, amount, GST)
+  PaymentProduct:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: PaymentProduct
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: productId
+          AttributeType: S
+        - AttributeName: entity
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: N
+      KeySchema:
+        - AttributeName: productId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: entity-createdAt-index
+          KeySchema:
+            - AttributeName: entity
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # DynamoDB Table for Payment Orders (Razorpay order + status at each step)
+  PaymentOrder:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: PaymentOrder
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+        - AttributeName: mobile
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: N
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: mobile-createdAt-index
+          KeySchema:
+            - AttributeName: mobile
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-createdAt-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # DynamoDB Table for Payment Config (Razorpay keys in env; methods/notes in DB)
+  PaymentConfig:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: PaymentConfig
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: configKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: configKey
+          KeyType: HASH
+
   # SQS Queue for Inbound Messages
   InboundMessageQueue:
     Type: AWS::SQS::Queue
@@ -375,6 +450,91 @@ Resources:
             Method: post
             RestApiId: !Ref ApiGateway
 
+  # Lambda Function for Payment API (Razorpay; JWT auth)
+  PaymentAPI:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: PaymentAPI
+      CodeUri: src/payment-api/
+      Handler: app.handler
+      Runtime: nodejs18.x
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          PAYMENT_PRODUCT_TABLE_NAME: !Ref PaymentProduct
+          PAYMENT_ORDER_TABLE_NAME: !Ref PaymentOrder
+          PAYMENT_CONFIG_TABLE_NAME: !Ref PaymentConfig
+          JWT_ACCESS_SECRET: "change-me-in-production"
+          RAZORPAY_KEY_ID: "rzp_live_SAqR5JwruL1avE"
+          RAZORPAY_KEY_SECRET: "PhYERkRJUCViSWFk3NuerYQP"
+          RAZORPAY_WEBHOOK_SECRET: "PhYERkRJUCViSWFk3NuerYQP"
+          RAZORPAY_BUSINESS_NAME: "Merchant"
+          RAZORPAY_TEST_MODE: "true"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentProduct
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentOrder
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentConfig
+        - CloudWatchLogsFullAccess
+      Events:
+        PaymentProductsPost:
+          Type: Api
+          Properties:
+            Path: /payment/products
+            Method: post
+            RestApiId: !Ref ApiGateway
+        PaymentProductsGet:
+          Type: Api
+          Properties:
+            Path: /payment/products
+            Method: get
+            RestApiId: !Ref ApiGateway
+        PaymentProductPatch:
+          Type: Api
+          Properties:
+            Path: /payment/products/{productId}
+            Method: patch
+            RestApiId: !Ref ApiGateway
+        PaymentConfigGet:
+          Type: Api
+          Properties:
+            Path: /payment/config
+            Method: get
+            RestApiId: !Ref ApiGateway
+        PaymentConfigPatch:
+          Type: Api
+          Properties:
+            Path: /payment/config
+            Method: patch
+            RestApiId: !Ref ApiGateway
+        PaymentOrdersPost:
+          Type: Api
+          Properties:
+            Path: /payment/orders
+            Method: post
+            RestApiId: !Ref ApiGateway
+        PaymentVerifyPost:
+          Type: Api
+          Properties:
+            Path: /payment/verify
+            Method: post
+            RestApiId: !Ref ApiGateway
+        PaymentPaymentsGet:
+          Type: Api
+          Properties:
+            Path: /payment/payments
+            Method: get
+            RestApiId: !Ref ApiGateway
+        PaymentWebhookPost:
+          Type: Api
+          Properties:
+            Path: /payment/webhook
+            Method: post
+            RestApiId: !Ref ApiGateway
+
   # API Gateway REST API
   ApiGateway:
     Type: AWS::Serverless::Api
@@ -382,7 +542,7 @@ Resources:
       Name: WhatsAppBotApi
       StageName: prod
       Cors:
-        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowMethods: "'GET,POST,PATCH,OPTIONS'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
         AllowOrigin: "'*'"
 
@@ -404,6 +564,12 @@ Outputs:
     Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod'
     Export:
       Name: !Sub '${AWS::StackName}-AuthApiUrl'
+  
+  PaymentApiUrl:
+    Description: API Gateway base URL for payment API (Razorpay)
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    Export:
+      Name: !Sub '${AWS::StackName}-PaymentApiUrl'
   
   InboundMessageQueueUrl:
     Description: SQS Queue URL for inbound messages

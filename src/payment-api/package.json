@@ -1,0 +1,16 @@
+{
+  "name": "payment-api",
+  "version": "1.0.0",
+  "description": "Payment API - Razorpay orders, products, status; JWT auth",
+  "main": "app.js",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.490.0",
+    "@aws-sdk/lib-dynamodb": "^3.490.0",
+    "jsonwebtoken": "^9.0.2",
+    "razorpay": "^2.9.2",
+    "uuid": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

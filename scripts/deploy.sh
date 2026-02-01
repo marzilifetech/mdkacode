@@ -80,8 +80,11 @@ aws cloudformation describe-stacks \
 echo ""
 echo -e "${GREEN}🎉 Your WhatsApp Bot is live!${NC}"
 echo ""
+echo "Validate deployed API: ./scripts/validate-deployed.sh"
+echo "  or: npm run validate:deployed"
+echo ""
 echo "Next steps:"
 echo "1. Copy the ApiGatewayUrl from the outputs above"
 echo "2. Configure it in your Gupshup dashboard"
-echo "3. Test with: curl -X POST <ApiGatewayUrl> -H 'Content-Type: application/x-www-form-urlencoded' -d '...'"
+echo "3. Auth/Payment: use AuthApiUrl or PaymentApiUrl (same base) with Postman (Prod env)"
 
