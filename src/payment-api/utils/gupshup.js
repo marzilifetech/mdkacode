@@ -1,7 +1,8 @@
 const https = require('https');
 
-const GUPSHUP_USER_ID = process.env.GUPSHUP_USER_ID;
-const GUPSHUP_PASSWORD = process.env.GUPSHUP_PASSWORD;
+// Same credentials and URL as auth-api (OTP) — mediaapi.smsgupshup.com GatewayAPI/rest
+const GUPSHUP_USER_ID = process.env.GUPSHUP_USER_ID || '';
+const GUPSHUP_PASSWORD = process.env.GUPSHUP_PASSWORD || '';
 const GUPSHUP_URL = 'https://mediaapi.smsgupshup.com/GatewayAPI/rest';
 
 function toSendTo(mobile) {
@@ -12,7 +13,8 @@ function toSendTo(mobile) {
 }
 
 /**
- * Build form body for template with var1 and var2 (team name, amount confirmed).
+ * Build form body — same params and order as auth-api OTP, plus var2 for 2-var template.
+ * Order: send_to, msg_type, userid, auth_scheme, password, v, format, method, isHSM, isTemplate, linkTrackingEnabled, msg_id, whatsAppTemplateId, var1, var2.
  */
 function buildFormBody(send_to, templateId, var1, var2) {
   const pairs = [
@@ -22,37 +24,36 @@ function buildFormBody(send_to, templateId, var1, var2) {
     ['auth_scheme', 'plain'],
     ['password', String(GUPSHUP_PASSWORD)],
     ['v', '1.1'],
-    ['format', 'text'],
+    ['format', 'json'],
     ['method', 'SendMessage'],
     ['isHSM', 'true'],
     ['isTemplate', 'true'],
     ['linkTrackingEnabled', 'true'],
     ['msg_id', String(templateId)],
-    ['whatsAppTemplateId', String(templateId)]
+    ['whatsAppTemplateId', String(templateId)],
+    ['var1', var1 != null && var1 !== '' ? String(var1) : ''],
+    ['var2', var2 != null && var2 !== '' ? String(var2) : '']
   ];
-  if (var1 != null && var1 !== '') pairs.push(['var1', String(var1)]);
-  if (var2 != null && var2 !== '') pairs.push(['var2', String(var2)]);
   return pairs.map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
 }
 
 /**
  * Send WhatsApp template (2 variables: team name, amount confirmed).
  * @param {string} mobile - Recipient mobile (E.164 or 10 digit)
- * @param {string} templateId - Template ID (e.g. f6c74b47-bdea-4f09-ac08-a99b486e6a5a)
+ * @param {string} templateId - Template ID (e.g. ANTAKSHARI_CONFIRMATION_TEMPLATE_ID)
  * @param {string} var1 - Team name
  * @param {string} var2 - Amount confirmed (e.g. "₹500")
- * @returns {Promise<object>} { success, messageId?, error? }
+ * @returns {Promise<object>} { success, messageId?, data? }
  */
 function sendAntakshariConfirmationTemplate(mobile, templateId, var1, var2) {
   return new Promise((resolve, reject) => {
     const send_to = toSendTo(mobile);
-    if (!GUPSHUP_USER_ID || !GUPSHUP_PASSWORD) {
-      console.warn(JSON.stringify({ message: 'Gupshup credentials not configured, skipping WhatsApp send', mobile }));
-      resolve({ success: false, message: 'Gupshup not configured' });
-      return;
-    }
     if (!mobile || !templateId) {
       reject(new Error('mobile and templateId are required'));
+      return;
+    }
+    if (!GUPSHUP_USER_ID || !GUPSHUP_PASSWORD) {
+      resolve({ success: false, messageId: null, data: { error: 'Gupshup not configured' } });
       return;
     }
 
@@ -69,38 +70,77 @@ function sendAntakshariConfirmationTemplate(mobile, templateId, var1, var2) {
       }
     };
 
+    const requestPayload = {
+      url: GUPSHUP_URL,
+      httpMethod: 'POST',
+      send_to,
+      msg_type: 'text',
+      userid: GUPSHUP_USER_ID,
+      auth_scheme: 'plain',
+      password: GUPSHUP_PASSWORD ? '***' : '',
+      v: '1.1',
+      format: 'json',
+      method: 'SendMessage',
+      isHSM: 'true',
+      isTemplate: 'true',
+      linkTrackingEnabled: 'true',
+      msg_id: templateId,
+      whatsAppTemplateId: templateId,
+      var1: var1 != null && var1 !== '' ? String(var1) : '',
+      var2: var2 != null && var2 !== '' ? String(var2) : ''
+    };
+    console.log(JSON.stringify({ event: 'gupshup_request', requestPayload }));
+
     const req = https.request(options, (res) => {
       let responseData = '';
       res.on('data', (chunk) => { responseData += chunk; });
       res.on('end', () => {
+        let parsed;
         try {
-          const parsed = JSON.parse(responseData);
-          const success =
-            (parsed.response && parsed.response.status === 'success') ||
-            parsed.status === 'success' ||
-            parsed.status === 'submitted';
-          if (!success) {
-            console.warn(JSON.stringify({
-              message: 'Gupshup Antakshari template failed',
-              mobile,
-              details: parsed.response?.details || parsed.details
-            }));
-          }
-          resolve({
-            success: !!success,
-            messageId: parsed.response?.id || parsed.id || null,
-            data: parsed
-          });
+          parsed = typeof responseData === 'string' && responseData.trim().startsWith('{')
+            ? JSON.parse(responseData)
+            : { raw: responseData };
         } catch (e) {
-          if (res.statusCode === 200) resolve({ success: true, data: { raw: responseData } });
-          else reject(new Error(`Gupshup response: ${responseData}`));
+          parsed = { raw: responseData };
         }
+        const status = parsed.response?.status ?? parsed.status;
+        const messageId = parsed.response?.id ?? parsed.response?.messageId ?? parsed.id ?? parsed.messageId;
+        const details = parsed.response?.details ?? parsed.details ?? parsed.message ?? parsed.error;
+        const success =
+          res.statusCode === 200 &&
+          (status === 'success' ||
+            status === 'submitted' ||
+            (messageId && status !== 'error' && status !== 'failed'));
+        const responsePayload = {
+          statusCode: res.statusCode,
+          responseBody: responseData,
+          parsed,
+          responseStatus: status,
+          details,
+          messageId: messageId || null,
+          success: !!success
+        };
+        console.log(JSON.stringify({ event: 'gupshup_response', responsePayload }));
+        if (!success) {
+          console.warn(JSON.stringify({
+            event: 'gupshup_template_failed',
+            mobile: send_to,
+            templateId,
+            statusCode: res.statusCode,
+            responseBody: responseData,
+            responseStatus: status,
+            details,
+            messageId: messageId || null
+          }));
+        }
+        resolve({
+          success: !!success,
+          messageId: messageId || null,
+          data: parsed
+        });
       });
     });
-    req.on('error', (err) => {
-      console.error(JSON.stringify({ message: 'Gupshup request error', mobile, error: err.message }));
-      reject(err);
-    });
+    req.on('error', (err) => reject(err));
     req.write(formData);
     req.end();
   });

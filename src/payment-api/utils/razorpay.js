@@ -90,12 +90,19 @@ function verifyPaymentSignature(orderId, paymentId, signature) {
  * @returns {boolean}
  */
 function verifyWebhookSignature(body, signature) {
-  if (!WEBHOOK_SECRET) return false;
+  if (!WEBHOOK_SECRET || !signature || typeof body !== 'string') return false;
   const expected = crypto
     .createHmac('sha256', WEBHOOK_SECRET)
     .update(body)
     .digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(signature, 'utf8'), Buffer.from(expected, 'utf8'));
+  const sigBuf = Buffer.from(signature, 'utf8');
+  const expBuf = Buffer.from(expected, 'utf8');
+  if (sigBuf.length !== expBuf.length) return false;
+  try {
+    return crypto.timingSafeEqual(sigBuf, expBuf);
+  } catch {
+    return false;
+  }
 }
 
 module.exports = {

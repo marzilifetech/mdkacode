@@ -282,6 +282,18 @@
         },
         {
           "name": "Create Order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.order && json.order.order_id) { pm.collectionVariables.set('razorpay_order_id', json.order.order_id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -297,7 +309,7 @@
               "host": ["{{base_url}}"],
               "path": ["payment", "orders"]
             },
-            "description": "Create Razorpay order by productId (or productName). Returns order_id, amount, key for Checkout. Use order_id in client Razorpay Checkout."
+            "description": "Create Razorpay order by productId (or productName). Returns order_id, amount, key for Checkout. Saves order_id to razorpay_order_id for Test Post-Payment WhatsApp (Mock)."
           }
         },
         {
@@ -353,6 +365,25 @@
               "path": ["payment", "webhook"]
             },
             "description": "Razorpay calls this; no JWT. For manual testing set X-Razorpay-Signature (HMAC of body with RAZORPAY_WEBHOOK_SECRET)."
+          }
+        },
+        {
+          "name": "Test Post-Payment WhatsApp (Mock)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"payment.captured\",\n  \"payload\": {\n    \"payment\": {\n      \"entity\": {\n        \"id\": \"pay_mock_1\",\n        \"order_id\": \"{{razorpay_order_id}}\",\n        \"method\": \"upi\"\n      }\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/webhook",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "webhook"]
+            },
+            "description": "Test post-payment WhatsApp flow locally with MOCK. Steps: 1) Use Local env (base_url = http://localhost:3001). 2) Auth: Request OTP → Verify OTP. 3) Register a product (or use existing product_id). 4) Create Order (POST /payment/orders) with productId and Bearer token; copy order_id from response and set collection variable razorpay_order_id. 5) Call this request (no X-Razorpay-Signature needed when LOCAL_MOCK_PAYMENT=true). WhatsApp will be sent to the mobile on the order if GUPSHUP_USER_ID, GUPSHUP_PASSWORD, ANTAKSHARI_CONFIRMATION_TEMPLATE_ID are in env.json PaymentAPI section. Check server logs for payment_captured_webhook and whatsapp_antakshari_sent."
           }
         }
       ]

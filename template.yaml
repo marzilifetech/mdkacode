@@ -516,7 +516,7 @@ Resources:
           RAZORPAY_TEST_MODE: "true"
           GUPSHUP_USER_ID: "2000261475"
           GUPSHUP_PASSWORD: "Op9uy64zU"
-          ANTAKSHARI_CONFIRMATION_TEMPLATE_ID: "f6c74b47-bdea-4f09-ac08-a99b486e6a5a"
+          ANTAKSHARI_CONFIRMATION_TEMPLATE_ID: "890136667129407"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PaymentProduct
