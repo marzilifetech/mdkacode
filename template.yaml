@@ -509,8 +509,8 @@ Resources:
           PAYMENT_ORDER_TABLE_NAME: !Ref PaymentOrder
           PAYMENT_CONFIG_TABLE_NAME: !Ref PaymentConfig
           JWT_ACCESS_SECRET: "change-me-in-production"
-          RAZORPAY_KEY_ID: "rzp_live_SAqR5JwruL1avE"
-          RAZORPAY_KEY_SECRET: "PhYERkRJUCViSWFk3NuerYQP"
+          RAZORPAY_KEY_ID: "rzp_live_SBC37jQHctihRH"
+          RAZORPAY_KEY_SECRET: "4V03tZmBimSEz3y2JkwFYp2S"
           RAZORPAY_WEBHOOK_SECRET: "PhYERkRJUCViSWFk3NuerYQP"
           RAZORPAY_BUSINESS_NAME: "Merchant"
           RAZORPAY_TEST_MODE: "true"
