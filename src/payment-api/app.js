@@ -8,6 +8,8 @@ const {
   getPaymentOrder,
   updatePaymentOrder,
   listPaymentOrdersByMobile,
+  getTeamByPaymentOrderId,
+  updateTeamPaymentStatus,
   getPaymentConfig,
   putPaymentConfig
 } = require('./utils/dynamodb');
@@ -337,7 +339,20 @@ async function handlePostWebhook(event) {
   });
   log('info', 'payment_api', { event: 'webhook_order_updated', orderId });
 
-  const teamName = order.antakshariTeamName || order.productName || 'Participant';
+  const team = await getTeamByPaymentOrderId(orderId);
+  if (team && team.teamId) {
+    try {
+      await updateTeamPaymentStatus(team.teamId, 'captured');
+      log('info', 'payment_api', { event: 'webhook_team_payment_status_updated', orderId, teamId: team.teamId });
+    } catch (e) {
+      log('warn', 'payment_api', { event: 'webhook_team_payment_status_failed', orderId, teamId: team.teamId, error: e.message });
+    }
+  }
+  // Team name for WhatsApp: prefer order.antakshariTeamName (set at link-order, avoids GSI eventual consistency), then team from DB, never product name
+  const fromOrder = order.antakshariTeamName != null ? String(order.antakshariTeamName).trim() : '';
+  const fromTeam = team && team.teamName != null ? String(team.teamName).trim() : '';
+  const teamName = fromOrder !== '' ? fromOrder : (fromTeam !== '' ? fromTeam : 'Participant');
+  log('info', 'payment_api', { event: 'webhook_team_name_resolved', orderId, teamName, source: fromOrder !== '' ? 'order' : (fromTeam !== '' ? 'team' : 'fallback') });
   const alreadySent = !!order.whatsappConfirmationSentAt;
   const mobile = order.mobile;
 

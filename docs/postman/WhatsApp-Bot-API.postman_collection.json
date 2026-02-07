@@ -53,7 +53,7 @@
   "item": [
     {
       "name": "Auth API",
-      "description": "JWT + OTP via WhatsApp. Request OTP → Verify OTP → Use access/refresh tokens.",
+      "description": "JWT + OTP via WhatsApp. Request OTP → Verify OTP → Use access/refresh tokens. Verify OTP and Refresh return userType ('guest' or 'ADMIN'; ADMIN if mobile is in ADMIN_MOBILES).",
       "item": [
         {
           "name": "Request OTP",
@@ -109,7 +109,7 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "otp", "verify"]
             },
-            "description": "Verifies OTP and returns accessToken + refreshToken. Saves tokens to collection variables for Refresh and Dashboard requests."
+            "description": "Verifies OTP and returns accessToken, refreshToken, and userType ('guest' or 'ADMIN'). Saves tokens to collection variables for Refresh and Dashboard requests."
           }
         },
         {
@@ -131,7 +131,27 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "refresh"]
             },
-            "description": "Returns new access and refresh tokens. Uses refresh_token from collection variables (set by Verify OTP)."
+            "description": "Returns new access and refresh tokens and userType. Uses refresh_token from collection variables (set by Verify OTP)."
+          }
+        },
+        {
+          "name": "Update User Permission",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"{{mobile}}\",\n  \"userType\": \"ADMIN\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/user/permission",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "user", "permission"]
+            },
+            "description": "Update a user's userType to ADMIN or guest. Caller must be ADMIN (Bearer token with userType ADMIN). Body: mobile (E.164 or 10-digit), userType ('ADMIN' or 'guest'). Target user gets new type on next refresh/login."
           }
         }
       ]
@@ -364,7 +384,7 @@
               "host": ["{{base_url}}"],
               "path": ["payment", "webhook"]
             },
-            "description": "Razorpay calls this; no JWT. For manual testing set X-Razorpay-Signature (HMAC of body with RAZORPAY_WEBHOOK_SECRET)."
+            "description": "Razorpay calls this; no JWT. On payment.captured the handler looks up the order, then sends WhatsApp confirmation (team name or product name, amount) via Gupshup. For manual testing set X-Razorpay-Signature (HMAC of body with RAZORPAY_WEBHOOK_SECRET)."
           }
         },
         {
@@ -383,7 +403,7 @@
               "host": ["{{base_url}}"],
               "path": ["payment", "webhook"]
             },
-            "description": "Test post-payment WhatsApp flow locally with MOCK. Steps: 1) Use Local env (base_url = http://localhost:3001). 2) Auth: Request OTP → Verify OTP. 3) Register a product (or use existing product_id). 4) Create Order (POST /payment/orders) with productId and Bearer token; copy order_id from response and set collection variable razorpay_order_id. 5) Call this request (no X-Razorpay-Signature needed when LOCAL_MOCK_PAYMENT=true). WhatsApp will be sent to the mobile on the order if GUPSHUP_USER_ID, GUPSHUP_PASSWORD, ANTAKSHARI_CONFIRMATION_TEMPLATE_ID are in env.json PaymentAPI section. Check server logs for payment_captured_webhook and whatsapp_antakshari_sent."
+            "description": "Test post-payment WhatsApp flow locally with MOCK. Steps: 1) Use Local env (base_url = http://localhost:3001). 2) Auth: Request OTP → Verify OTP. 3) Register a product (or use existing product_id). 4) Create Order (POST /payment/orders) with productId and Bearer token; copy order_id from response and set collection variable razorpay_order_id. 5) Call this request (no X-Razorpay-Signature needed when LOCAL_MOCK_PAYMENT=true). WhatsApp confirmation (team/product name + amount) is sent to the order mobile if Gupshup env (GUPSHUP_USER_ID, GUPSHUP_PASSWORD, template ID) is set in env.json PaymentAPI. Check server logs for payment_captured_webhook and whatsapp result."
           }
         }
       ]
@@ -530,10 +550,13 @@
               "host": ["{{base_url}}"],
               "path": ["antakshari", "teams"],
               "query": [
-                { "key": "ref", "value": "{{antakshari_ref}}", "disabled": true }
+                { "key": "ref", "value": "{{antakshari_ref}}", "disabled": true },
+                { "key": "search", "value": "", "disabled": true, "description": "Filter by team name or member name (case-insensitive substring)" },
+                { "key": "limit", "value": "50", "disabled": true, "description": "Admin only: page size (default 50, max 100)" },
+                { "key": "nextToken", "value": "", "disabled": true, "description": "Admin only: token for next page" }
               ]
             },
-            "description": "List teams (with members and payment status). Optional query: ref."
+            "description": "List teams (with members and payment status). ADMIN gets all teams with pagination. Optional query: ref, search (team name or member name), limit and nextToken (admin pagination)."
           }
         }
       ]

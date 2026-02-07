@@ -6,35 +6,50 @@ const JWT_ACCESS_EXPIRY = process.env.JWT_ACCESS_EXPIRY || '1h';
 const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
 
 /**
- * Sign access JWT for a mobile (subject).
+ * Sign access JWT for a mobile (subject) and optional userType.
  * @param {string} mobile - E.164 mobile (sub claim)
+ * @param {string|null} [userType] - User type: 'guest', 'ADMIN', or others; default 'guest'
  * @returns {string} Signed access token
  */
-function signAccess(mobile) {
-  return jwt.sign(
-    { sub: mobile, type: 'access' },
-    JWT_ACCESS_SECRET,
-    { expiresIn: JWT_ACCESS_EXPIRY, algorithm: 'HS256' }
-  );
+function signAccess(mobile, userType) {
+  const payload = { sub: mobile, type: 'access' };
+  if (userType != null && userType !== '') payload.userType = String(userType);
+  else payload.userType = 'guest';
+  return jwt.sign(payload, JWT_ACCESS_SECRET, { expiresIn: JWT_ACCESS_EXPIRY, algorithm: 'HS256' });
 }
 
 /**
- * Sign refresh JWT for a mobile.
+ * Sign refresh JWT for a mobile and optional userType.
  * @param {string} mobile - E.164 mobile (sub claim)
+ * @param {string|null} [userType] - User type: 'guest', 'ADMIN', or others; default 'guest'
  * @returns {string} Signed refresh token
  */
-function signRefresh(mobile) {
-  return jwt.sign(
-    { sub: mobile, type: 'refresh' },
-    JWT_REFRESH_SECRET,
-    { expiresIn: JWT_REFRESH_EXPIRY, algorithm: 'HS256' }
-  );
+function signRefresh(mobile, userType) {
+  const payload = { sub: mobile, type: 'refresh' };
+  if (userType != null && userType !== '') payload.userType = String(userType);
+  else payload.userType = 'guest';
+  return jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: JWT_REFRESH_EXPIRY, algorithm: 'HS256' });
+}
+
+/**
+ * Verify access token and return decoded payload.
+ * @param {string} token - JWT string (Bearer prefix optional)
+ * @returns {object} Decoded payload { sub, type, userType?, iat, exp }
+ * @throws {Error} If invalid or not type 'access'
+ */
+function verifyAccess(token) {
+  const t = typeof token === 'string' && token.startsWith('Bearer ') ? token.slice(7) : token;
+  const decoded = jwt.verify(t, JWT_ACCESS_SECRET, { algorithms: ['HS256'] });
+  if (decoded.type !== 'access') {
+    throw new Error('Invalid token type');
+  }
+  return decoded;
 }
 
 /**
  * Verify refresh token and return decoded payload.
  * @param {string} token - JWT string
- * @returns {object} Decoded payload { sub, type, iat, exp }
+ * @returns {object} Decoded payload { sub, type, userType?, iat, exp }
  * @throws {Error} If invalid or not type 'refresh'
  */
 function verifyRefresh(token) {
@@ -61,6 +76,7 @@ function getAccessExpirySeconds() {
 module.exports = {
   signAccess,
   signRefresh,
+  verifyAccess,
   verifyRefresh,
   getAccessExpirySeconds
 };

@@ -7,7 +7,7 @@ const {
   updateOTPAttemptStatus
 } = require('./utils/dynamodb');
 const { sendTemplateMessage } = require('./utils/gupshup');
-const { signAccess, signRefresh, verifyRefresh, getAccessExpirySeconds } = require('./utils/jwt');
+const { signAccess, signRefresh, verifyAccess, verifyRefresh, getAccessExpirySeconds } = require('./utils/jwt');
 const {
   generateOTP,
   hashOTP,
@@ -19,8 +19,22 @@ const {
 const USER_AUTH_TEMPLATE_ID = process.env.USER_AUTH_TEMPLATE_ID || 'user_authentication';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'change-me-refresh';
 
+/** Comma-separated list of E.164 mobiles that get userType ADMIN (e.g. ADMIN_MOBILES=91999...,91998...). */
+const ADMIN_MOBILES = (process.env.ADMIN_MOBILES || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
 /** When set to 'true' or '1', skip DynamoDB and Gupshup (for local testing without AWS credentials). */
 const LOCAL_MOCK_AUTH = process.env.LOCAL_MOCK_AUTH === 'true' || process.env.LOCAL_MOCK_AUTH === '1';
+
+/** Resolve userType: preserve existing userType, or ADMIN if mobile in ADMIN_MOBILES, else guest. */
+function resolveUserType(existingUser, mobile) {
+  if (existingUser && existingUser.userType != null && existingUser.userType !== '') {
+    return existingUser.userType;
+  }
+  return ADMIN_MOBILES.includes(mobile) ? 'ADMIN' : 'guest';
+}
 
 /** Detect AWS credential/security token errors so we can fall back to mock locally. */
 function isAwsCredentialError(err) {
@@ -37,7 +51,7 @@ function isAwsCredentialError(err) {
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-  'Access-Control-Allow-Methods': 'POST,OPTIONS'
+  'Access-Control-Allow-Methods': 'POST,PATCH,OPTIONS'
 };
 
 /**
@@ -207,15 +221,17 @@ async function handleOtpVerify(event) {
     if (code !== '123456') {
       return respond(401, { success: false, error: 'Invalid OTP (mock: use 123456)' });
     }
-    const accessToken = signAccess(mobile);
-    const refreshToken = signRefresh(mobile);
+    const userType = 'guest';
+    const accessToken = signAccess(mobile, userType);
+    const refreshToken = signRefresh(mobile, userType);
     const expiresIn = getAccessExpirySeconds();
     return respond(200, {
       success: true,
       accessToken,
       refreshToken,
       expiresIn,
-      tokenType: 'Bearer'
+      tokenType: 'Bearer',
+      userType
     });
   }
 
@@ -240,17 +256,20 @@ async function handleOtpVerify(event) {
 
     const now = Date.now();
     const platform = body.platform || 'unknown';
+    const existingUser = await getAuthUser(mobile);
+    const userType = resolveUserType(existingUser, mobile);
     await putAuthUser({
       mobile,
       validatedAt: now,
       platform,
-      createdAt: now,
+      userType,
+      createdAt: existingUser?.createdAt ?? now,
       updatedAt: now,
       ...(body.metadata && typeof body.metadata === 'object' ? { metadata: body.metadata } : {})
     });
 
-    const accessToken = signAccess(mobile);
-    const refreshToken = signRefresh(mobile);
+    const accessToken = signAccess(mobile, userType);
+    const refreshToken = signRefresh(mobile, userType);
     const expiresIn = getAccessExpirySeconds();
 
     return respond(200, {
@@ -258,20 +277,23 @@ async function handleOtpVerify(event) {
       accessToken,
       refreshToken,
       expiresIn,
-      tokenType: 'Bearer'
+      tokenType: 'Bearer',
+      userType
     });
   } catch (err) {
     if (isAwsCredentialError(err) && code === '123456') {
       console.warn(JSON.stringify({ message: 'AWS credential error, returning mock verify tokens', mobile }));
-      const accessToken = signAccess(mobile);
-      const refreshToken = signRefresh(mobile);
+      const userType = 'guest';
+      const accessToken = signAccess(mobile, userType);
+      const refreshToken = signRefresh(mobile, userType);
       const expiresIn = getAccessExpirySeconds();
       return respond(200, {
         success: true,
         accessToken,
         refreshToken,
         expiresIn,
-        tokenType: 'Bearer'
+        tokenType: 'Bearer',
+        userType
       });
     }
     if (isAwsCredentialError(err)) {
@@ -279,6 +301,51 @@ async function handleOtpVerify(event) {
     }
     throw err;
   }
+}
+
+/**
+ * PATCH /auth/user/permission — Update a user's userType (ADMIN only).
+ * Body: { mobile, userType } where userType is 'ADMIN' or 'guest'.
+ */
+async function handlePatchUserPermission(event) {
+  const authHeader = event.headers?.Authorization || event.headers?.authorization || '';
+  let decoded;
+  try {
+    decoded = verifyAccess(authHeader);
+  } catch (err) {
+    return respond(401, { success: false, error: 'Invalid or expired access token' });
+  }
+  const callerUserType = decoded.userType || 'guest';
+  if (callerUserType !== 'ADMIN') {
+    return respond(403, { success: false, error: 'Only ADMIN can update user permission' });
+  }
+
+  const body = parseBody(event);
+  const mobile = normalizeMobile(body.mobile);
+  if (!mobile) {
+    return respond(400, { success: false, error: 'Valid mobile is required' });
+  }
+  const userType = body.userType != null ? String(body.userType).trim() : '';
+  if (userType !== 'ADMIN' && userType !== 'guest') {
+    return respond(400, { success: false, error: 'userType must be ADMIN or guest' });
+  }
+
+  if (LOCAL_MOCK_AUTH) {
+    return respond(200, { success: true, mobile, userType, message: 'Permission updated (mock)' });
+  }
+
+  const existing = await getAuthUser(mobile);
+  if (!existing) {
+    return respond(404, { success: false, error: 'User not found' });
+  }
+
+  const now = Date.now();
+  await putAuthUser({
+    ...existing,
+    userType,
+    updatedAt: now
+  });
+  return respond(200, { success: true, mobile, userType });
 }
 
 /**
@@ -298,8 +365,9 @@ async function handleRefresh(event) {
     return respond(401, { success: false, error: 'Invalid or expired refresh token' });
   }
 
-  const accessToken = signAccess(decoded.sub);
-  const newRefreshToken = signRefresh(decoded.sub);
+  const userType = decoded.userType || 'guest';
+  const accessToken = signAccess(decoded.sub, userType);
+  const newRefreshToken = signRefresh(decoded.sub, userType);
   const expiresIn = getAccessExpirySeconds();
 
   return respond(200, {
@@ -307,7 +375,8 @@ async function handleRefresh(event) {
     accessToken,
     refreshToken: newRefreshToken,
     expiresIn,
-    tokenType: 'Bearer'
+    tokenType: 'Bearer',
+    userType
   });
 }
 
@@ -331,6 +400,9 @@ exports.handler = async (event) => {
     }
     if (path === '/auth/refresh' && method === 'POST') {
       return await handleRefresh(event);
+    }
+    if (path === '/auth/user/permission' && method === 'PATCH') {
+      return await handlePatchUserPermission(event);
     }
 
     return respond(404, { success: false, error: 'Not found' });

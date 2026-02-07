@@ -14,9 +14,11 @@ const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 const PRODUCT_TABLE = process.env.PAYMENT_PRODUCT_TABLE_NAME;
 const ORDER_TABLE = process.env.PAYMENT_ORDER_TABLE_NAME;
 const CONFIG_TABLE = process.env.PAYMENT_CONFIG_TABLE_NAME;
+const TEAM_TABLE = process.env.ANTAKSHARI_TEAM_TABLE_NAME;
 
 const GSI_ENTITY_CREATED = 'entity-createdAt-index';
 const GSI_MOBILE_CREATED = 'mobile-createdAt-index';
+const GSI_PAYMENT_ORDER_ID = 'paymentOrderId-index';
 const CONFIG_KEY_DEFAULT = 'default';
 
 // --- Product ---
@@ -165,6 +167,47 @@ async function listPaymentOrdersByMobile(mobile, limit = 50) {
   return result.Items || [];
 }
 
+// --- AntakshariTeam (lookup by orderId for WhatsApp team name) ---
+
+/**
+ * Get team linked to a payment order (by paymentOrderId GSI).
+ * @param {string} orderId - Razorpay order_id
+ * @returns {Promise<object|null>} Team item with teamName, or null
+ */
+async function getTeamByPaymentOrderId(orderId) {
+  if (!TEAM_TABLE) return null;
+  const result = await dynamoClient.send(
+    new QueryCommand({
+      TableName: TEAM_TABLE,
+      IndexName: GSI_PAYMENT_ORDER_ID,
+      KeyConditionExpression: 'paymentOrderId = :orderId',
+      ExpressionAttributeValues: { ':orderId': orderId },
+      Limit: 1
+    })
+  );
+  const items = result.Items || [];
+  return items.length ? items[0] : null;
+}
+
+/**
+ * Update AntakshariTeam paymentStatus (so GET /antakshari/teams returns correct status).
+ * @param {string} teamId
+ * @param {string} paymentStatus - e.g. 'captured'
+ */
+async function updateTeamPaymentStatus(teamId, paymentStatus) {
+  if (!TEAM_TABLE || !teamId || paymentStatus == null) return;
+  const now = Date.now();
+  await dynamoClient.send(
+    new UpdateCommand({
+      TableName: TEAM_TABLE,
+      Key: { teamId },
+      UpdateExpression: 'SET #paymentStatus = :paymentStatus, updatedAt = :updatedAt',
+      ExpressionAttributeNames: { '#paymentStatus': 'paymentStatus' },
+      ExpressionAttributeValues: { ':paymentStatus': String(paymentStatus), ':updatedAt': now }
+    })
+  );
+}
+
 // --- PaymentConfig ---
 
 /**
@@ -206,6 +249,8 @@ module.exports = {
   getPaymentOrder,
   updatePaymentOrder,
   listPaymentOrdersByMobile,
+  getTeamByPaymentOrderId,
+  updateTeamPaymentStatus,
   getPaymentConfig,
   putPaymentConfig
 };

@@ -3,6 +3,7 @@ const {
   putTeam,
   getTeam,
   listTeamsByOwner,
+  listAllTeams,
   updateTeamPaymentOrder,
   putMember,
   getMembersByTeam,
@@ -292,10 +293,11 @@ async function handlePostLinkOrder(event, teamId) {
       log('link_order_mismatch', { requestId, mobile, teamId, orderId });
       return respond(403, { success: false, error: 'Order does not belong to you' });
     }
-    await updateTeamPaymentOrder(teamId, orderId);
-    if (team.teamName) {
-      await updatePaymentOrderWithAntakshari(orderId, team.teamName);
-    }
+    const orderStatus = order && order.status != null ? order.status : 'created';
+    await updateTeamPaymentOrder(teamId, orderId, orderStatus);
+    // Always set team name on order so post-payment WhatsApp can use it (avoids GSI timing)
+    const nameToStore = team.teamName != null ? String(team.teamName).trim() : '';
+    await updatePaymentOrderWithAntakshari(orderId, nameToStore);
   } else {
     const t = mockTeams.get(teamId);
     if (t) mockTeams.set(teamId, { ...t, paymentOrderId: orderId, updatedAt: Date.now() });
@@ -331,10 +333,17 @@ async function handleGetUsers(event) {
   const results = [];
   for (const team of teams) {
     const members = LOCAL_MOCK_ANTAKSHARI ? (mockMembers.get(team.teamId) || []) : await getMembersByTeam(team.teamId);
+    // Always use live order status when team has a linked order (source of truth for payment status)
     let paymentStatus = null;
-    if (team.paymentOrderId && !LOCAL_MOCK_ANTAKSHARI) {
+    let paymentDate = null;
+    if (team.paymentOrderId) {
       const order = await getPaymentOrder(team.paymentOrderId);
-      paymentStatus = order ? order.status : null;
+      paymentStatus = order && order.status != null ? order.status : (team.paymentStatus || null);
+      if (order && order.capturedAt != null) {
+        paymentDate = new Date(order.capturedAt).toISOString();
+      }
+    } else if (team.paymentStatus != null && team.paymentStatus !== '') {
+      paymentStatus = team.paymentStatus;
     }
     for (const m of members) {
       const profile = LOCAL_MOCK_ANTAKSHARI ? mockProfiles.get(m.phone) || null : await getUserProfile(m.phone);
@@ -344,6 +353,7 @@ async function handleGetUsers(event) {
         ref: team.ref,
         paymentOrderId: team.paymentOrderId || null,
         paymentStatus,
+        paymentDate,
         memberIndex: m.memberIndex,
         name: m.name,
         phone: m.phone,
@@ -357,19 +367,41 @@ async function handleGetUsers(event) {
   return respond(200, { success: true, users: results });
 }
 
-/** GET /antakshari/teams — optional ref; list teams with members and payment status */
+/** GET /antakshari/teams — optional ref; list teams with members and payment status. ADMIN gets all teams. */
 async function handleGetTeams(event) {
   const requestId = getRequestId(event);
-  const mobile = getMobileFromAuth(event);
-  if (!mobile) {
+  const auth = event.headers?.Authorization || event.headers?.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (!token) {
     log('teams_get_unauthorized', { requestId });
     return respond(401, { success: false, error: 'Unauthorized' });
   }
+  let decoded;
+  try {
+    decoded = verifyAccess(token);
+  } catch {
+    log('teams_get_unauthorized', { requestId });
+    return respond(401, { success: false, error: 'Unauthorized' });
+  }
+  const mobile = decoded.sub || null;
+  const isAdmin = (decoded.userType || '').toUpperCase() === 'ADMIN';
 
   const ref = event.queryStringParameters?.ref;
+  const limitParam = event.queryStringParameters?.limit;
+  const nextTokenParam = event.queryStringParameters?.nextToken;
+  const searchParam = event.queryStringParameters?.search || event.queryStringParameters?.q || '';
+  const searchTerm = typeof searchParam === 'string' ? searchParam.trim() : '';
   let teams;
+  let nextToken;
   if (LOCAL_MOCK_ANTAKSHARI) {
-    teams = Array.from(mockTeams.values()).filter((t) => t.ownerMobile === mobile).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const allMock = Array.from(mockTeams.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    teams = isAdmin ? allMock : allMock.filter((t) => t.ownerMobile === mobile);
+  } else if (isAdmin) {
+    const limitNum = parseInt(limitParam, 10);
+    const limit = Math.min(Math.max(1, Number.isFinite(limitNum) ? limitNum : 50), 100);
+    const result = await listAllTeams(limit, nextTokenParam || undefined);
+    teams = result.items;
+    nextToken = result.nextToken;
   } else {
     teams = await listTeamsByOwner(mobile, 100);
   }
@@ -378,10 +410,17 @@ async function handleGetTeams(event) {
   const results = [];
   for (const team of teams) {
     const members = LOCAL_MOCK_ANTAKSHARI ? (mockMembers.get(team.teamId) || []) : await getMembersByTeam(team.teamId);
+    // Always use live order status when team has a linked order (source of truth for payment status)
     let paymentStatus = null;
-    if (team.paymentOrderId && !LOCAL_MOCK_ANTAKSHARI) {
+    let paymentDate = null;
+    if (team.paymentOrderId) {
       const order = await getPaymentOrder(team.paymentOrderId);
-      paymentStatus = order ? order.status : null;
+      paymentStatus = order && order.status != null ? order.status : (team.paymentStatus || null);
+      if (order && order.capturedAt != null) {
+        paymentDate = new Date(order.capturedAt).toISOString();
+      }
+    } else if (team.paymentStatus != null && team.paymentStatus !== '') {
+      paymentStatus = team.paymentStatus;
     }
     results.push({
       teamId: team.teamId,
@@ -389,12 +428,26 @@ async function handleGetTeams(event) {
       ref: team.ref,
       paymentOrderId: team.paymentOrderId || null,
       paymentStatus,
+      paymentDate,
       members: members.map((m) => ({ memberIndex: m.memberIndex, name: m.name, phone: m.phone, dob: m.dob }))
     });
   }
 
-  log('teams_listed', { requestId, mobile, count: results.length });
-  return respond(200, { success: true, teams: results });
+  if (searchTerm !== '') {
+    const term = searchTerm.toLowerCase();
+    const filtered = results.filter((r) => {
+      if (r.teamName && String(r.teamName).toLowerCase().includes(term)) return true;
+      if (r.members && r.members.some((m) => m.name && String(m.name).toLowerCase().includes(term))) return true;
+      return false;
+    });
+    results.length = 0;
+    results.push(...filtered);
+  }
+
+  log('teams_listed', { requestId, mobile, count: results.length, hasNextToken: !!nextToken, search: searchTerm || undefined });
+  const body = { success: true, teams: results };
+  if (nextToken != null) body.nextToken = nextToken;
+  return respond(200, body);
 }
 
 exports.handler = async (event) => {

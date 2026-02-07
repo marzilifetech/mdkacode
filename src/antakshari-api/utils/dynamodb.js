@@ -4,6 +4,7 @@ const {
   GetCommand,
   PutCommand,
   QueryCommand,
+  ScanCommand,
   UpdateCommand
 } = require('@aws-sdk/lib-dynamodb');
 
@@ -65,6 +66,37 @@ async function listTeamsByOwner(ownerMobile, limit = 50) {
     })
   );
   return result.Items || [];
+}
+
+/**
+ * List all teams (for admin) with pagination. Scan with limit and optional start key.
+ * @param {number} limit - Max items to return (default 50, max 100)
+ * @param {string} [nextToken] - Opaque token from previous response for next page
+ * @returns {Promise<{ items: object[], nextToken?: string }>}
+ */
+async function listAllTeams(limit = 50, nextToken) {
+  if (!TEAM_TABLE) return { items: [], nextToken: undefined };
+  const safeLimit = Math.min(Math.max(1, Number(limit) || 50), 100);
+  let exclusiveStartKey;
+  if (nextToken && typeof nextToken === 'string') {
+    try {
+      exclusiveStartKey = JSON.parse(Buffer.from(nextToken, 'base64url').toString('utf8'));
+    } catch {
+      exclusiveStartKey = undefined;
+    }
+  }
+  const result = await dynamoClient.send(
+    new ScanCommand({
+      TableName: TEAM_TABLE,
+      Limit: safeLimit,
+      ...(exclusiveStartKey && { ExclusiveStartKey: exclusiveStartKey })
+    })
+  );
+  const items = result.Items || [];
+  const newNextToken = result.LastEvaluatedKey
+    ? Buffer.from(JSON.stringify(result.LastEvaluatedKey), 'utf8').toString('base64url')
+    : undefined;
+  return { items, nextToken: newNextToken };
 }
 
 /**
@@ -199,6 +231,7 @@ module.exports = {
   putTeam,
   getTeam,
   listTeamsByOwner,
+  listAllTeams,
   updateTeamPaymentOrder,
   putMember,
   getMembersByTeam,

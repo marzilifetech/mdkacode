@@ -33,7 +33,8 @@ async function getAuthUser(mobile) {
 
 /**
  * Create or update auth user (upsert).
- * @param {object} item - { mobile, validatedAt, platform, createdAt, updatedAt, metadata? }
+ * @param {object} item - { mobile, validatedAt, platform, createdAt, updatedAt, userType?, metadata? }
+ *   userType: 'guest' | 'ADMIN' | others; default guest or null
  * @returns {Promise<void>}
  */
 async function putAuthUser(item) {

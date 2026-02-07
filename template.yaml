@@ -280,6 +280,8 @@ Resources:
           AttributeType: S
         - AttributeName: createdAt
           AttributeType: N
+        - AttributeName: paymentOrderId
+          AttributeType: S
       KeySchema:
         - AttributeName: teamId
           KeyType: HASH
@@ -290,6 +292,12 @@ Resources:
               KeyType: HASH
             - AttributeName: createdAt
               KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: paymentOrderId-index
+          KeySchema:
+            - AttributeName: paymentOrderId
+              KeyType: HASH
           Projection:
             ProjectionType: ALL
 
@@ -467,6 +475,7 @@ Resources:
           JWT_ACCESS_EXPIRY: "1h"
           JWT_REFRESH_EXPIRY: "7d"
           USER_AUTH_TEMPLATE_ID: "1440838324490390"  # Or META Template ID from Gupshup Console (Templates -> info icon)
+          ADMIN_MOBILES: ""   # Optional: comma-separated E.164 mobiles that get userType ADMIN (e.g. 919999999999,919888888888)
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AuthUser
@@ -492,6 +501,12 @@ Resources:
             Path: /auth/refresh
             Method: post
             RestApiId: !Ref ApiGateway
+        AuthUserPermissionPatch:
+          Type: Api
+          Properties:
+            Path: /auth/user/permission
+            Method: patch
+            RestApiId: !Ref ApiGateway
 
   # Lambda Function for Payment API (Razorpay; JWT auth)
   PaymentAPI:
@@ -508,6 +523,7 @@ Resources:
           PAYMENT_PRODUCT_TABLE_NAME: !Ref PaymentProduct
           PAYMENT_ORDER_TABLE_NAME: !Ref PaymentOrder
           PAYMENT_CONFIG_TABLE_NAME: !Ref PaymentConfig
+          ANTAKSHARI_TEAM_TABLE_NAME: !Ref AntakshariTeam
           JWT_ACCESS_SECRET: "change-me-in-production"
           RAZORPAY_KEY_ID: "rzp_live_SBC37jQHctihRH"
           RAZORPAY_KEY_SECRET: "4V03tZmBimSEz3y2JkwFYp2S"
@@ -524,6 +540,8 @@ Resources:
             TableName: !Ref PaymentOrder
         - DynamoDBCrudPolicy:
             TableName: !Ref PaymentConfig
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AntakshariTeam
         - CloudWatchLogsFullAccess
       Events:
         PaymentProductsPost:

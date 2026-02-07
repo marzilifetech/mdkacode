@@ -13,8 +13,8 @@ function toSendTo(mobile) {
 }
 
 /**
- * Build form body — same params and order as auth-api OTP, plus var2 for 2-var template.
- * Order: send_to, msg_type, userid, auth_scheme, password, v, format, method, isHSM, isTemplate, linkTrackingEnabled, msg_id, whatsAppTemplateId, var1, var2.
+ * Build form body — matches working curl (no isTemplate, no linkTrackingEnabled).
+ * Order: send_to, msg_type, userid, auth_scheme, password, v, format, method, isHSM, msg_id, whatsAppTemplateId, var1, var2.
  */
 function buildFormBody(send_to, templateId, var1, var2) {
   const pairs = [
@@ -27,8 +27,6 @@ function buildFormBody(send_to, templateId, var1, var2) {
     ['format', 'json'],
     ['method', 'SendMessage'],
     ['isHSM', 'true'],
-    ['isTemplate', 'true'],
-    ['linkTrackingEnabled', 'true'],
     ['msg_id', String(templateId)],
     ['whatsAppTemplateId', String(templateId)],
     ['var1', var1 != null && var1 !== '' ? String(var1) : ''],
@@ -82,8 +80,6 @@ function sendAntakshariConfirmationTemplate(mobile, templateId, var1, var2) {
       format: 'json',
       method: 'SendMessage',
       isHSM: 'true',
-      isTemplate: 'true',
-      linkTrackingEnabled: 'true',
       msg_id: templateId,
       whatsAppTemplateId: templateId,
       var1: var1 != null && var1 !== '' ? String(var1) : '',
