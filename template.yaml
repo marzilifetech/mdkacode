@@ -267,6 +267,35 @@ Resources:
         - AttributeName: configKey
           KeyType: HASH
 
+  # DynamoDB Table for Meta Webhook Events (generic Meta webhooks with S3 payload pointer)
+  MetaWebhookEventLog:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MetaWebhookEventLog
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: eventId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: eventId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  # DynamoDB Table for Bot Config (runtime toggles, e.g. Gupshup ignore-reply)
+  BotConfig:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: BotConfig
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: configKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: configKey
+          KeyType: HASH
+
   # DynamoDB Table for Antakshari Teams
   AntakshariTeam:
     Type: AWS::DynamoDB::Table
@@ -342,9 +371,13 @@ Resources:
           INBOUND_QUEUE_URL: !Ref InboundMessageQueue
           WHATSAPP_BUSINESS_NUMBER: "916366743602"  # WhatsApp Business number in E.164 format
           GUPSHUP_VERIFICATION_KEY: "NYEV"  # Gupshup verification key
+          GUPSHUP_IGNORE_REPLY: "false"  # When true: older method - do not send to SQS, no reply to any message (messages still logged to DynamoDB). API override stored in BotConfig.
+          BOT_CONFIG_TABLE_NAME: !Ref BotConfig
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref WhatsAppMessageLog
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BotConfig
         - SQSSendMessagePolicy:
             QueueName: !GetAtt InboundMessageQueue.QueueName
         - CloudWatchLogsFullAccess
@@ -353,6 +386,65 @@ Resources:
           Type: Api
           Properties:
             Path: /webhook/inbound
+            Method: post
+            RestApiId: !Ref ApiGateway
+
+  # Lambda Function for Meta Webhook (Meta Graph API / WhatsApp)
+  MetaWebhook:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: MetaWebhook
+      CodeUri: src/meta-webhook/
+      Handler: app.handler
+      Runtime: nodejs18.x
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          META_WEBHOOK_EVENT_TABLE_NAME: !Ref MetaWebhookEventLog
+          META_WEBHOOK_S3_BUCKET: "xyz-lambda-data"
+          META_WEBHOOK_VERIFY_TOKEN: "QuKgEJPQ8WPydCSpDtcRWOKAhZjGMbRRavsS0DmHtfrzc5ptiJsVpyKMML6Uezgl"
+          META_APP_SECRET: "57a76601f3af432a7f42bae105f3bd89"
+          META_SIGNATURE_REQUIRED: "false"
+          META_PAGE_ACCESS_TOKEN_SSM_NAME: "/whatsapp-bot/meta-page-access-token"
+          META_GRAPH_API_VERSION: "v25.0"
+          META_PHONE_NUMBER_ID: "1048410191679469"
+          MESSAGE_LOG_TABLE_NAME: !Ref WhatsAppMessageLog
+          BOT_CONFIG_TABLE_NAME: !Ref BotConfig
+          USER_PROFILE_TABLE_NAME: !Ref UserProfile
+          CONVERSATION_STATE_TABLE_NAME: !Ref UserConversationState
+          ESCALATION_TABLE_NAME: !Ref HumanEscalation
+          DEFAULT_FLOW_ID: "marzi-lead"
+          WEBHOOK_TTL_DAYS: "90"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MetaWebhookEventLog
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WhatsAppMessageLog
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BotConfig
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserProfile
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserConversationState
+        - DynamoDBCrudPolicy:
+            TableName: !Ref HumanEscalation
+        - S3WritePolicy:
+            BucketName: "xyz-lambda-data"
+        - CloudWatchLogsFullAccess
+        - SSMParameterWithSlashPrefixReadPolicy:
+            ParameterName: "/whatsapp-bot/meta-page-access-token"
+      Events:
+        MetaWebhookGet:
+          Type: Api
+          Properties:
+            Path: /webhook/meta
+            Method: get
+            RestApiId: !Ref ApiGateway
+        MetaWebhookPost:
+          Type: Api
+          Properties:
+            Path: /webhook/meta
             Method: post
             RestApiId: !Ref ApiGateway
 
@@ -412,6 +504,10 @@ Resources:
           CONVERSATION_STATE_TABLE_NAME: !Ref UserConversationState
           MESSAGE_LOG_TABLE_NAME: !Ref WhatsAppMessageLog
           ESCALATION_TABLE_NAME: !Ref HumanEscalation
+          BOT_CONFIG_TABLE_NAME: !Ref BotConfig
+          META_PAGE_ACCESS_TOKEN_SSM_NAME: "/whatsapp-bot/meta-page-access-token"
+          META_GRAPH_API_VERSION: "v25.0"
+          META_PHONE_NUMBER_ID: "1048410191679469"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UserProfile
@@ -421,7 +517,11 @@ Resources:
             TableName: !Ref WhatsAppMessageLog
         - DynamoDBCrudPolicy:
             TableName: !Ref HumanEscalation
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BotConfig
         - CloudWatchLogsFullAccess
+        - SSMParameterWithSlashPrefixReadPolicy:
+            ParameterName: "/whatsapp-bot/meta-page-access-token"
       Events:
         DashboardStats:
           Type: Api
@@ -452,6 +552,72 @@ Resources:
           Properties:
             Path: /dashboard/escalations
             Method: get
+            RestApiId: !Ref ApiGateway
+        DashboardEscalationsPatch:
+          Type: Api
+          Properties:
+            Path: /dashboard/escalations/{escalationId}
+            Method: patch
+            RestApiId: !Ref ApiGateway
+        DashboardConfigGupshupGet:
+          Type: Api
+          Properties:
+            Path: /dashboard/config/gupshup
+            Method: get
+            RestApiId: !Ref ApiGateway
+        DashboardConfigGupshupPatch:
+          Type: Api
+          Properties:
+            Path: /dashboard/config/gupshup
+            Method: patch
+            RestApiId: !Ref ApiGateway
+        DashboardConfigMetaGet:
+          Type: Api
+          Properties:
+            Path: /dashboard/config/meta
+            Method: get
+            RestApiId: !Ref ApiGateway
+        DashboardConfigMetaPatch:
+          Type: Api
+          Properties:
+            Path: /dashboard/config/meta
+            Method: patch
+            RestApiId: !Ref ApiGateway
+        DashboardBotStatusGet:
+          Type: Api
+          Properties:
+            Path: /dashboard/bot/status
+            Method: get
+            RestApiId: !Ref ApiGateway
+        DashboardBotStatusPatch:
+          Type: Api
+          Properties:
+            Path: /dashboard/bot/status
+            Method: patch
+            RestApiId: !Ref ApiGateway
+        ApiFlowsList:
+          Type: Api
+          Properties:
+            Path: /api/flows
+            Method: get
+            RestApiId: !Ref ApiGateway
+        ApiFlowsGet:
+          Type: Api
+          Properties:
+            Path: /api/flows/{flowId}
+            Method: get
+            RestApiId: !Ref ApiGateway
+        ApiFlowsPut:
+          Type: Api
+          Properties:
+            Path: /api/flows/{flowId}
+            Method: put
+            RestApiId: !Ref ApiGateway
+        DashboardMessagesSend:
+          Type: Api
+          Properties:
+            Path: /dashboard/messages/send
+            Method: post
             RestApiId: !Ref ApiGateway
 
   # Lambda Function for Auth API (JWT + OTP via WhatsApp)
@@ -705,6 +871,9 @@ Outputs:
     Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod'
     Export:
       Name: !Sub '${AWS::StackName}-PaymentApiUrl'
+  MetaWebhookCallbackUrl:
+    Description: API Gateway callback URL for Meta Webhook
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/webhook/meta'
   
   InboundMessageQueueUrl:
     Description: SQS Queue URL for inbound messages

@@ -1,5 +1,5 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, GetCommand, QueryCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
 
 const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: {
@@ -296,6 +296,41 @@ async function getUserEscalations(tableName, mobile, limit = 50) {
 }
 
 /**
+ * Get escalation by escalationId (PK). Returns first match.
+ * @param {string} tableName - HumanEscalation table name
+ * @param {string} escalationId - e.g. esc_1739900000000
+ * @returns {Promise<object|null>}
+ */
+async function getEscalationById(tableName, escalationId) {
+  if (!tableName || !escalationId) return null;
+  try {
+    const result = await dynamoClient.send(new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: 'escalationId = :id',
+      ExpressionAttributeValues: { ':id': escalationId },
+      Limit: 1
+    }));
+    return (result.Items && result.Items[0]) || null;
+  } catch (error) {
+    throw new Error(`Error getting escalation: ${error.message}`);
+  }
+}
+
+/**
+ * Resolve escalation (set status to 'resolved'). Bot will resume replying to this user.
+ * @param {string} tableName - HumanEscalation table name
+ * @param {string} escalationId - e.g. esc_1739900000000
+ * @returns {Promise<object|null>} Updated item or null if not found
+ */
+async function resolveEscalation(tableName, escalationId) {
+  const item = await getEscalationById(tableName, escalationId);
+  if (!item) return null;
+  const updated = { ...item, status: 'resolved', resolvedAt: Date.now() };
+  await dynamoClient.send(new PutCommand({ TableName: tableName, Item: updated }));
+  return updated;
+}
+
+/**
  * Get dashboard statistics
  * @param {object} tables - Table names object
  * @returns {Promise<object>} Dashboard stats
@@ -390,6 +425,8 @@ module.exports = {
   getConversationMessages,
   getPendingEscalations,
   getUserEscalations,
+  getEscalationById,
+  resolveEscalation,
   getDashboardStats
 };
 

@@ -1,5 +1,5 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
 const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
 const querystring = require('querystring');
 
@@ -12,6 +12,41 @@ const MESSAGE_LOG_TABLE_NAME = process.env.MESSAGE_LOG_TABLE_NAME;
 const INBOUND_QUEUE_URL = process.env.INBOUND_QUEUE_URL;
 const WHATSAPP_BUSINESS_NUMBER = process.env.WHATSAPP_BUSINESS_NUMBER || '916366743602';
 const SKIP_AWS_CALLS = process.env.SKIP_AWS_CALLS === 'true' || process.env.AWS_SAM_LOCAL === 'true';
+const BOT_CONFIG_TABLE_NAME = process.env.BOT_CONFIG_TABLE_NAME;
+/** Default from env: when true, do not send to SQS (no reply). API override stored in BotConfig. */
+const GUPSHUP_IGNORE_REPLY_DEFAULT = process.env.GUPSHUP_IGNORE_REPLY === 'true' || process.env.GUPSHUP_IGNORE_REPLY === '1';
+
+const GUPSHUP_IGNORE_REPLY_CACHE_MS = 60 * 1000;
+let gupshupIgnoreReplyCached = null;
+let gupshupIgnoreReplyCacheTime = 0;
+
+/**
+ * Resolve Gupshup ignore-reply flag: BotConfig (with short cache) overrides env default.
+ * @returns {Promise<boolean>}
+ */
+async function getGupshupIgnoreReply() {
+  if (BOT_CONFIG_TABLE_NAME && Date.now() - gupshupIgnoreReplyCacheTime < GUPSHUP_IGNORE_REPLY_CACHE_MS && gupshupIgnoreReplyCached !== null) {
+    return gupshupIgnoreReplyCached;
+  }
+  if (BOT_CONFIG_TABLE_NAME) {
+    try {
+      const res = await dynamoClient.send(new GetCommand({
+        TableName: BOT_CONFIG_TABLE_NAME,
+        Key: { configKey: 'gupshup' }
+      }));
+      if (res.Item && typeof res.Item.ignoreReply === 'boolean') {
+        gupshupIgnoreReplyCached = res.Item.ignoreReply;
+        gupshupIgnoreReplyCacheTime = Date.now();
+        return gupshupIgnoreReplyCached;
+      }
+    } catch (err) {
+      console.warn('BotConfig get gupshup failed, using env default', err.message);
+    }
+  }
+  gupshupIgnoreReplyCached = GUPSHUP_IGNORE_REPLY_DEFAULT;
+  gupshupIgnoreReplyCacheTime = Date.now();
+  return gupshupIgnoreReplyCached;
+}
 
 /**
  * Detect Gupshup event type
@@ -663,20 +698,30 @@ exports.handler = async (event) => {
       }));
     }
     
-    // Send to SQS (skip if in local test mode)
-    console.log(JSON.stringify({
-      message: '📤 Preparing SQS message',
-      requestId: requestId,
-      queueUrl: INBOUND_QUEUE_URL,
-      messageSize: JSON.stringify(parsedPayload).length
-    }));
-    
-    if (!SKIP_AWS_CALLS) {
+    const ignoreReply = await getGupshupIgnoreReply();
+    // Send to SQS (skip if in local test mode or ignore-reply = true)
+    if (ignoreReply) {
+      console.log(JSON.stringify({
+        message: '⏭️ Gupshup ignore-reply is on - not sending to SQS (no reply will be sent)',
+        requestId: requestId,
+        mobile: parsedPayload.mobile,
+        type: parsedPayload.type
+      }));
+    } else {
+      console.log(JSON.stringify({
+        message: '📤 Preparing SQS message',
+        requestId: requestId,
+        queueUrl: INBOUND_QUEUE_URL,
+        messageSize: JSON.stringify(parsedPayload).length
+      }));
+    }
+
+    if (!SKIP_AWS_CALLS && !ignoreReply) {
       const sqsCommand = new SendMessageCommand({
         QueueUrl: INBOUND_QUEUE_URL,
         MessageBody: JSON.stringify(parsedPayload)
       });
-      
+
       const sqsResponse = await sqsClient.send(sqsCommand);
       console.log(JSON.stringify({
         message: '✅ Message sent to SQS successfully',
@@ -686,7 +731,7 @@ exports.handler = async (event) => {
         mobile: parsedPayload.mobile,
         type: parsedPayload.type
       }));
-    } else {
+    } else if (SKIP_AWS_CALLS) {
       console.log(JSON.stringify({
         message: '⚠️ Skipping SQS call (local test mode)',
         requestId: requestId,

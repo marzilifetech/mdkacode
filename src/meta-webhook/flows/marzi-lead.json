@@ -1,0 +1,292 @@
+{
+  "id": "marzi-lead",
+  "start": "check_crm",
+  "nodes": {
+    "check_crm": {
+      "type": "condition",
+      "conditions": [
+        { "when": "crm_registered", "next": "registered_menu" },
+        { "when": "crm_activated", "next": "activated_menu" },
+        { "when": "crm_lead", "next": "resume_lead" },
+        { "when": "crm_new", "next": "hook_intro" }
+      ],
+      "defaultNext": "hook_intro"
+    },
+    "registered_menu": {
+      "type": "menu",
+      "messageKey": "welcome_back_registered_menu",
+      "options": [
+        { "value": "1", "label": "📅 Explore Upcoming Meetups", "next": "registered_meetups" },
+        { "value": "2", "label": "🙋 Talk to Support", "next": "registered_support" }
+      ]
+    },
+    "registered_meetups": {
+      "type": "message",
+      "messageKey": "community_link_main",
+      "next": "closing"
+    },
+    "registered_support": {
+      "type": "action",
+      "action": "escalate_support",
+      "next": "end_support"
+    },
+    "end_support": {
+      "type": "message",
+      "messageKey": "support_flagged",
+      "next": "end"
+    },
+    "activated_menu": {
+      "type": "menu",
+      "messageKey": "welcome_back_activated_menu",
+      "options": [
+        { "value": "1", "label": "⛱️ Explore Holidays & Travels", "next": "activated_holidays" },
+        { "value": "2", "label": "📅 Explore Upcoming Meetups", "next": "activated_meetups" },
+        { "value": "3", "label": "🙋 Talk to Support", "next": "activated_support" }
+      ]
+    },
+    "activated_holidays": {
+      "type": "message",
+      "messageKey": "holidays_link",
+      "next": "closing"
+    },
+    "activated_meetups": {
+      "type": "message",
+      "messageKey": "community_link_main",
+      "next": "closing"
+    },
+    "activated_support": {
+      "type": "action",
+      "action": "escalate_support",
+      "next": "end_support"
+    },
+    "resume_lead": {
+      "type": "message",
+      "messageKey": "welcome_back_resume",
+      "next": "resume_check"
+    },
+    "resume_check": {
+      "type": "condition",
+      "conditions": [
+        { "when": "missing_name", "next": "ask_name" },
+        { "when": "missing_dob", "next": "ask_dob" },
+        { "when": "missing_city", "next": "ask_city" }
+      ],
+      "defaultNext": "phase4_welcome"
+    },
+    "hook_intro": {
+      "type": "message",
+      "messageKey": "hook_namaste",
+      "next": "hook_ask_yes_no"
+    },
+    "hook_ask_yes_no": {
+      "type": "menu",
+      "messageKey": "hook_would_you_like",
+      "options": [
+        { "value": "yes", "label": "Yes, tell me more", "next": "ask_name" },
+        { "value": "no", "label": "No, thanks", "next": "end_no_thanks" }
+      ]
+    },
+    "end_no_thanks": {
+      "type": "message",
+      "messageKey": "end_no_problem",
+      "next": "end"
+    },
+    "ask_name": {
+      "type": "message",
+      "messageKey": "ask_full_name",
+      "next": "collect_name"
+    },
+    "collect_name": {
+      "type": "action",
+      "action": "save_name",
+      "next": "ask_dob",
+      "retryMessageKey": "ask_full_name"
+    },
+    "ask_dob": {
+      "type": "message",
+      "messageKey": "ask_dob",
+      "next": "collect_dob"
+    },
+    "collect_dob": {
+      "type": "action",
+      "action": "save_dob",
+      "next": "check_age",
+      "retryMessageKey": "ask_dob"
+    },
+    "check_age": {
+      "type": "condition",
+      "conditions": [
+        { "when": "age_under_50", "next": "age_under_50_msg" },
+        { "when": "age_50_plus", "next": "ask_city" }
+      ],
+      "defaultNext": "ask_dob"
+    },
+    "age_under_50_msg": {
+      "type": "menu",
+      "messageKey": "age_under_50",
+      "options": [
+        { "value": "yes", "label": "Yes, I want to Refer", "next": "referral_name" },
+        { "value": "no", "label": "No, thanks", "next": "end_referral_no" }
+      ]
+    },
+    "end_referral_no": {
+      "type": "message",
+      "messageKey": "end_referral_no",
+      "next": "end"
+    },
+    "referral_name": {
+      "type": "message",
+      "messageKey": "referral_ask_name",
+      "next": "collect_referral_name"
+    },
+    "collect_referral_name": {
+      "type": "action",
+      "action": "save_referral_name",
+      "next": "referral_mobile",
+      "retryMessageKey": "referral_ask_name"
+    },
+    "referral_mobile": {
+      "type": "message",
+      "messageKey": "referral_ask_mobile",
+      "next": "collect_referral_mobile"
+    },
+    "collect_referral_mobile": {
+      "type": "action",
+      "action": "save_referral_mobile",
+      "next": "referral_city",
+      "retryMessageKey": "referral_ask_mobile"
+    },
+    "referral_city": {
+      "type": "message",
+      "messageKey": "referral_ask_city",
+      "next": "collect_referral_city"
+    },
+    "collect_referral_city": {
+      "type": "action",
+      "action": "save_referral_city",
+      "next": "referral_thank_you",
+      "retryMessageKey": "referral_ask_city"
+    },
+    "referral_thank_you": {
+      "type": "message",
+      "messageKey": "referral_thank_you",
+      "next": "end"
+    },
+    "ask_city": {
+      "type": "message",
+      "messageKey": "ask_city",
+      "next": "collect_city"
+    },
+    "collect_city": {
+      "type": "action",
+      "action": "save_city",
+      "next": "check_bangalore",
+      "retryMessageKey": "ask_city"
+    },
+    "check_bangalore": {
+      "type": "condition",
+      "conditions": [
+        { "when": "city_bangalore", "next": "ask_area" },
+        { "when": "city_other", "next": "city_other_msg" }
+      ],
+      "defaultNext": "phase4_welcome"
+    },
+    "city_other_msg": {
+      "type": "message",
+      "messageKey": "city_other",
+      "next": "phase4_welcome"
+    },
+    "ask_area": {
+      "type": "message",
+      "messageKey": "ask_area_bangalore",
+      "next": "collect_area"
+    },
+    "collect_area": {
+      "type": "action",
+      "action": "save_area",
+      "next": "phase4_welcome",
+      "retryMessageKey": "ask_area_bangalore"
+    },
+    "phase4_welcome": {
+      "type": "message",
+      "messageKey": "phase4_welcome",
+      "next": "phase4_community"
+    },
+    "phase4_community": {
+      "type": "message",
+      "messageKey": "phase4_community_intro",
+      "next": "phase4_interest_groups"
+    },
+    "phase4_interest_groups": {
+      "type": "menu",
+      "messageKey": "phase4_interest_groups",
+      "options": [
+        { "value": "1", "label": "Join our Music Lovers 🎵", "next": "interest_music" },
+        { "value": "2", "label": "Join our Laughter Champions 😂", "next": "interest_laughter" },
+        { "value": "3", "label": "Join our Business Gurus 💼", "next": "interest_business" },
+        { "value": "4", "label": "Join our Book Club 📚", "next": "interest_book" }
+      ],
+      "defaultNext": "closing"
+    },
+    "interest_music": {
+      "type": "message",
+      "messageKey": "interest_music_link",
+      "next": "closing"
+    },
+    "interest_laughter": {
+      "type": "message",
+      "messageKey": "interest_laughter_link",
+      "next": "closing"
+    },
+    "interest_business": {
+      "type": "message",
+      "messageKey": "interest_business_link",
+      "next": "closing"
+    },
+    "interest_book": {
+      "type": "message",
+      "messageKey": "interest_book_link",
+      "next": "closing"
+    },
+    "closing": {
+      "type": "message",
+      "messageKey": "closing",
+      "next": "end"
+    },
+    "end": {
+      "type": "message",
+      "messageKey": "closing",
+      "next": "end"
+    }
+  },
+  "messages": {
+    "welcome_back_registered_menu": "Welcome back to Marzi, {{name}}! 🌟 It's good to see you again. How can we help you today?\n\n1. 📅 Explore Upcoming Meetups\n2. 🙋 Talk to Support",
+    "welcome_back_activated_menu": "Welcome back to Marzi, {{name}}! 🌟 It's good to see you again. How can we help you today?\n\n1. ⛱️ Explore Holidays & Travels\n2. 📅 Explore Upcoming Meetups\n3. 🙋 Talk to Support",
+    "community_link_main": "Here is a special invite just for you - [Main Marzi Circle Community Invite Link]\n\nFeel free to chat with us whenever! We are here for you.",
+    "holidays_link": "Explore our Holidays & Travels - [Holidays Link]\n\nFeel free to chat with us whenever! We are here for you.",
+    "support_flagged": "I have flagged this for a Marzi Mitra to help you personally. They will get in touch soon! 🙋",
+    "welcome_back_resume": "Welcome back! We noticed you haven't joined our family yet. Let's quickly complete your profile so you can start exploring Marzi!",
+    "hook_namaste": "Namaste! 🙏 Welcome to Marzi. We are India's liveliest community exclusively for the 50+ generation. We create moments of joy, friendship, and adventure for your second innings!",
+    "hook_would_you_like": "Would you like to know more about how we can add joy to your life?",
+    "end_no_problem": "No problem! We are here whenever you are ready. Have a wonderful day! ☀️",
+    "ask_full_name": "Great! To help us personalize your experience, we would like to know you better. Please enter your full name.",
+    "ask_dob": "Lovely to meet you, {{name}}! Since Marzi is a curated active ageing community for 50+, could you please share your Date of Birth (DD-MM-YYYY)? This helps us confirm your eligibility.",
+    "age_under_50": "Oh! You seem to be younger than our cutoff. Marzi is strictly for the 50+ age group to ensure our members find like-minded peers. However, we'd love to welcome your parents or older relatives! Would you like to refer them?",
+    "end_referral_no": "No worries! Thank you for your time and have a great day!",
+    "referral_ask_name": "That's wonderful! Let's get them added. First, please type their Full Name.",
+    "referral_ask_mobile": "Thanks! Now, please share their Mobile Number.",
+    "referral_ask_city": "Got it. Finally, which City do they live in?",
+    "referral_thank_you": "Perfect! We have noted their details and will reach out to them soon. Thank you for spreading the joy! 🌟",
+    "ask_city": "Thanks, {{name}}! You fit right in. ✨ Which City do you currently live in? This helps us suggest the best of Marzi, happening near you.",
+    "city_other": "Got it! We are expanding fast and we'll be in {{city}} soon. Until then, our online events are open to everyone everywhere!",
+    "ask_area_bangalore": "Ah, namma Bengaluru! 🌳 Since we actively host our Marzi Family across many meetups in the city, it helps to know what's nearby. Which Area or Locality do you stay in? (e.g. Indiranagar, Jayanagar, Whitefield)",
+    "phase4_welcome": "Perfect! You're now a part of our growing Marzi Family, {{name}}. 🎉",
+    "phase4_community_intro": "Before everything else, we would love to introduce you to our Marzi family through our WhatsApp communities, where you'll find friends and interactions which will bring you joy!",
+    "phase4_interest_groups": "We also have curated communities for our members that have unique interests like music, books, laughter and upskilling. Would you like to join any of these interest-based groups? Feel free to join multiple groups basis your interests.\n\n1. Join our Music Lovers 🎵\n2. Join our Laughter Champions 😂\n3. Join our Business Gurus 💼\n4. Join our Book Club 📚",
+    "interest_music_link": "Here's your invite to our Music Lovers community - [Music Lovers Link]",
+    "interest_laughter_link": "Here's your invite to our Laughter Champions community - [Laughter Champions Link]",
+    "interest_business_link": "Here's your invite to our Business Gurus community - [Business Gurus Link]",
+    "interest_book_link": "Here's your invite to our Book Club community - [Book Club Link]",
+    "closing": "It was lovely chatting with you, {{name}}. Wishing you a pleasant day and lots of joy with the Marzi Community! Feel free to chat with us whenever! We are here for you."
+  }
+}

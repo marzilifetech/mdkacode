@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "WhatsApp Bot API",
-    "description": "Auth API (OTP + JWT), Dashboard API, Payment API (Razorpay), Antakshari API (team, profile, members, link-order). Use Postman environments: Local (base_url = http://localhost:3001) or Prod (base_url = your API Gateway URL).",
+    "description": "Auth API (OTP + JWT), Dashboard API (stats, users, flows, bot status, manual send), Meta Webhook, Payment API (Razorpay), Antakshari API. Use Postman environments: Local (base_url = http://localhost:3001) or Prod (base_url = your API Gateway URL).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -48,9 +48,69 @@
     {
       "key": "antakshari_ref",
       "value": "username_antakshari"
+    },
+    {
+      "key": "meta_verify_token",
+      "value": "QuKgEJPQ8WPydCSpDtcRWOKAhZjGMbRRavsS0DmHtfrzc5ptiJsVpyKMML6Uezgl"
+    },
+    {
+      "key": "phone_number_id",
+      "value": "1048410"
+    },
+    {
+      "key": "flow_id",
+      "value": "marzi-lead"
+    },
+    {
+      "key": "escalation_id",
+      "value": "esc_1739900000000",
+      "description": "From Escalations (list) response"
     }
   ],
   "item": [
+    {
+      "name": "Meta Webhook",
+      "description": "Meta Graph API / WhatsApp webhook. GET for verification. POST for incoming messages (flow runs, reply sent via Meta API).",
+      "item": [
+        {
+          "name": "Verify Callback (GET)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/webhook/meta?hub.mode=subscribe&hub.verify_token={{meta_verify_token}}&hub.challenge=test_challenge",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "meta"],
+              "query": [
+                { "key": "hub.mode", "value": "subscribe" },
+                { "key": "hub.verify_token", "value": "{{meta_verify_token}}" },
+                { "key": "hub.challenge", "value": "test_challenge" }
+              ]
+            },
+            "description": "Meta verification. Use same verify token as META_WEBHOOK_VERIFY_TOKEN. Echoes hub.challenge on success."
+          }
+        },
+        {
+          "name": "Send Test Message (POST)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"object\": \"whatsapp_business_account\",\n  \"entry\": [\n    {\n      \"id\": \"2150615905694421\",\n      \"changes\": [\n        {\n          \"value\": {\n            \"messaging_product\": \"whatsapp\",\n            \"metadata\": {\n              \"display_phone_number\": \"919035370857\",\n              \"phone_number_id\": \"{{phone_number_id}}\"\n            },\n            \"contacts\": [\n              { \"wa_id\": \"{{mobile}}\", \"profile\": { \"name\": \"Test User\" } }\n            ],\n            \"messages\": [\n              {\n                \"from\": \"{{mobile}}\",\n                \"id\": \"wamid.test123\",\n                \"timestamp\": \"1739900000\",\n                \"type\": \"text\",\n                \"text\": { \"body\": \"Hi\" }\n              }\n            ]\n          },\n          \"field\": \"messages\"\n        }\n      ]\n    }\n  ]\n}\n"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/meta",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "meta"]
+            },
+            "description": "Simulate incoming WhatsApp message. Uses {{mobile}} and {{phone_number_id}}. Bot runs flow and sends reply via Meta API."
+          }
+        }
+      ]
+    },
     {
       "name": "Auth API",
       "description": "JWT + OTP via WhatsApp. Request OTP → Verify OTP → Use access/refresh tokens. Verify OTP and Refresh return userType ('guest' or 'ADMIN'; ADMIN if mobile is in ADMIN_MOBILES).",
@@ -202,6 +262,253 @@
               "query": [{ "key": "mobile", "value": "{{mobile}}" }]
             },
             "description": "GET single user profile by mobile."
+          }
+        },
+        {
+          "name": "Config Gupshup (get)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/config/gupshup",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "config", "gupshup"]
+            },
+            "description": "Get Gupshup ignore-reply setting. Returns { \"ignoreReply\": true|false }. When true, inbound webhook does not send messages to SQS (no bot reply)."
+          }
+        },
+        {
+          "name": "Config Gupshup (enable ignore-reply)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ignoreReply\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/config/gupshup",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "config", "gupshup"]
+            },
+            "description": "Enable Gupshup ignore-reply: inbound messages are logged but not sent to SQS (no bot reply)."
+          }
+        },
+        {
+          "name": "Config Gupshup (disable ignore-reply)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ignoreReply\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/config/gupshup",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "config", "gupshup"]
+            },
+            "description": "Disable Gupshup ignore-reply: inbound messages are sent to SQS and bot replies as normal."
+          }
+        },
+        {
+          "name": "Config Meta (get)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/config/meta",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "config", "meta"]
+            },
+            "description": "Get Meta config (phoneNumberId). Use to verify or fix 'Object does not exist' error."
+          }
+        },
+        {
+          "name": "Config Meta (update phoneNumberId)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumberId\": \"{{phone_number_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/config/meta",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "config", "meta"]
+            },
+            "description": "Update phone number ID (from Meta Business Suite > WhatsApp > API Setup). Fixes 'Object with ID does not exist' error."
+          }
+        },
+        {
+          "name": "Bot Status (get)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/bot/status",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "bot", "status"]
+            },
+            "description": "Get bot enabled status. Returns { botEnabled: true|false }."
+          }
+        },
+        {
+          "name": "Bot Status (enable/disable)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/bot/status",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "bot", "status"]
+            },
+            "description": "Enable or disable the Meta bot. Body: { enabled: true|false } or { botEnabled: true|false }."
+          }
+        },
+        {
+          "name": "Flows (list)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/flows",
+              "host": ["{{base_url}}"],
+              "path": ["api", "flows"]
+            },
+            "description": "List flow IDs. Returns { flowIds: ['marzi-lead', ...] }."
+          }
+        },
+        {
+          "name": "Flow (get)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/flows/{{flow_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "flows", "{{flow_id}}"]
+            },
+            "description": "Get flow JSON by ID. Returns full flow definition (nodes, messages)."
+          }
+        },
+        {
+          "name": "Flow (save)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"marzi-lead\",\n  \"start\": \"check_crm\",\n  \"nodes\": {},\n  \"messages\": {}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/flows/{{flow_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "flows", "{{flow_id}}"]
+            },
+            "description": "Save flow to DynamoDB (BotConfig). Body: full flow JSON. Use Flow (get) to fetch current, edit, then PUT."
+          }
+        },
+        {
+          "name": "Send Message (manual)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"{{mobile}}\",\n  \"body\": \"Hello from dashboard!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/messages/send",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "messages", "send"]
+            },
+            "description": "Send WhatsApp text via Meta API. Body: { mobile, body } or { to, text }. Logged to WhatsAppMessageLog with source: manual."
+          }
+        },
+        {
+          "name": "Conversations (list)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/conversations?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "conversations"],
+              "query": [
+                { "key": "limit", "value": "50" },
+                { "key": "mobile", "value": "{{mobile}}", "disabled": true },
+                { "key": "lastKey", "value": "", "disabled": true }
+              ]
+            },
+            "description": "Get conversation states. Optional: mobile (single user), limit, lastKey."
+          }
+        },
+        {
+          "name": "Messages (by user)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/messages?mobile={{mobile}}&limit=100",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "messages"],
+              "query": [
+                { "key": "mobile", "value": "{{mobile}}" },
+                { "key": "limit", "value": "100" },
+                { "key": "conversationId", "value": "", "disabled": true },
+                { "key": "lastTimestamp", "value": "", "disabled": true }
+              ]
+            },
+            "description": "Get messages for a user. Required: mobile. Optional: conversationId, limit, lastTimestamp."
+          }
+        },
+        {
+          "name": "Escalations (list)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/escalations?status=pending",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "escalations"],
+              "query": [
+                { "key": "status", "value": "pending" },
+                { "key": "mobile", "value": "{{mobile}}", "disabled": true },
+                { "key": "limit", "value": "50", "disabled": true }
+              ]
+            },
+            "description": "Get escalations. status=pending for pending; or mobile for user's escalations."
+          }
+        },
+        {
+          "name": "Escalation (resolve)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/escalations/{{escalation_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "escalations", "{{escalation_id}}"]
+            },
+            "description": "Resolve escalation. Bot resumes replying to this user. Set escalation_id from Escalations (list) response."
           }
         }
       ]
