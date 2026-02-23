@@ -7,6 +7,8 @@
 const {
   calculateAge,
   isValidDOB,
+  normalizeDOB,
+  normalizeNameForDisplay,
   isYes,
   isNo,
   getMenuOption,
@@ -17,17 +19,19 @@ const {
 } = require('./utils/helpers');
 
 /**
- * Substitute {{var}} in template with values from profile and stepData.
- * @param {string} template - e.g. "Lovely to meet you, {{name}}!"
+ * Substitute {{var}} in template with values from profile, stepData, and flow.links.
+ * @param {string} template - e.g. "Lovely to meet you, {{name}}!" or "Join here: {{main_community_link}}"
  * @param {object} profile - userProfile from state
  * @param {object} stepData - state.stepData
+ * @param {object} links - flow.links (URLs for {{link_key}} placeholders)
  * @returns {string}
  */
-function substituteTemplate(template, profile = {}, stepData = {}) {
+function substituteTemplate(template, profile = {}, stepData = {}, links = {}) {
   if (!template || typeof template !== 'string') return '';
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => {
     if (profile[key] !== undefined && profile[key] !== null) return String(profile[key]);
     if (stepData[key] !== undefined && stepData[key] !== null) return String(stepData[key]);
+    if (links[key] !== undefined && links[key] !== null) return String(links[key]);
     return '';
   });
 }
@@ -37,8 +41,9 @@ function substituteTemplate(template, profile = {}, stepData = {}) {
  */
 function resolveMessage(flow, node, profile, stepData) {
   const messages = flow.messages || {};
+  const links = flow.links || {};
   const text = node.messageKey ? (messages[node.messageKey] || node.messageKey) : (node.text || '');
-  return substituteTemplate(text, profile, stepData);
+  return substituteTemplate(text, profile, stepData, links);
 }
 
 /**
@@ -104,6 +109,12 @@ async function runFlow(state, userInput, userProfile, flow) {
   const stepData = updatedState.stepData;
 
   let node = nodes[currentStep];
+  if (currentStep === 'end_flow' && input) {
+    currentStep = flow.start || 'check_crm';
+    updatedState.currentStep = currentStep;
+    updatedState.flowState = currentStep;
+    node = nodes[currentStep];
+  }
   if (!node) {
     const flowStart = flow.start || 'start';
     if (flowStart !== currentStep && nodes[flowStart]) {
@@ -145,7 +156,7 @@ async function runFlow(state, userInput, userProfile, flow) {
         }
       }
       if (node.action === 'save_dob' && input) {
-        const dob = extractDOB(input) || (isValidDOB(input.trim()) ? input.trim() : null);
+        const dob = extractDOB(input) || (normalizeDOB(input.trim()) || null);
         if (dob) {
           profile.dob = stepData.dob = dob;
           const age = calculateAge(dob);
@@ -159,22 +170,23 @@ async function runFlow(state, userInput, userProfile, flow) {
       if (node.action === 'save_city' && input) {
         const raw = extractCity(input) || input.trim();
         if (raw && raw.length >= 2) {
-          const city = isBangaloreFuzzy(raw) ? 'Bengaluru' : raw;
+          const city = isBangaloreFuzzy(raw) ? 'Bengaluru' : normalizeNameForDisplay(raw);
           profile.city = stepData.city = city;
           if (isBangaloreFuzzy(raw)) profile.area = stepData.area = null;
           actionSucceeded = true;
         }
       }
       if (node.action === 'save_area' && input) {
-        const area = input.trim();
+        const area = normalizeNameForDisplay(input.trim());
         if (area) {
           profile.area = stepData.area = area;
           actionSucceeded = true;
         }
       }
       if (node.action === 'save_referral_name' && input) {
-        const name = extractName(input) || input.trim();
-        if (name && name.length >= 2) {
+        const raw = extractName(input) || input.trim();
+        const name = raw ? normalizeNameForDisplay(raw) : '';
+        if (name.length >= 2) {
           stepData.referral_name = name;
           actionSucceeded = true;
         }
@@ -187,11 +199,46 @@ async function runFlow(state, userInput, userProfile, flow) {
         }
       }
       if (node.action === 'save_referral_city' && input) {
-        const city = extractCity(input) || input.trim();
+        const raw = extractCity(input) || input.trim();
+        const city = raw ? (isBangaloreFuzzy(raw) ? 'Bengaluru' : normalizeNameForDisplay(raw)) : '';
         if (city) {
           stepData.referral_city = city;
           actionSucceeded = true;
-          if (stepData.referral_name && stepData.referral_mobile) {
+        }
+      }
+      if (node.action === 'tag_referral_lead' || node.action === 'referral_end') {
+        shouldEscalate = true;
+        updatedState.referralEscalation = {
+          referralName: stepData.referral_name,
+          referralMobile: stepData.referral_mobile,
+          referralCity: stepData.referral_city
+        };
+        actionSucceeded = true;
+      }
+      if (node.action === 'escalate_support' || node.action === 'trigger_support_flow') {
+        shouldEscalate = true;
+        updatedState.supportEscalation = true;
+        actionSucceeded = true;
+      }
+      if (node.action === 'trigger_activation_meetups' || node.action === 'trigger_activation_holidays') {
+        actionSucceeded = true;
+      }
+      if (node.action === 'end_conversation') {
+        actionSucceeded = true;
+      }
+      if (actionSucceeded) {
+        if (node.messageKey) {
+          const body = resolveMessage(flow, node, profile, stepData);
+          if (body) outMessages.push({ type: 'text', body });
+        }
+        let next = node.next || currentStep;
+        let chainNode = nodes[next];
+        while (chainNode && chainNode.type === 'action') {
+          const noInputAction = chainNode.action === 'tag_referral_lead' || chainNode.action === 'referral_end' ||
+            chainNode.action === 'trigger_activation_meetups' || chainNode.action === 'trigger_activation_holidays' ||
+            chainNode.action === 'trigger_support_flow' || chainNode.action === 'end_conversation';
+          if (!noInputAction) break;
+          if (chainNode.action === 'tag_referral_lead' || chainNode.action === 'referral_end') {
             shouldEscalate = true;
             updatedState.referralEscalation = {
               referralName: stepData.referral_name,
@@ -199,40 +246,34 @@ async function runFlow(state, userInput, userProfile, flow) {
               referralCity: stepData.referral_city
             };
           }
+          if (chainNode.action === 'trigger_support_flow') {
+            shouldEscalate = true;
+            updatedState.supportEscalation = true;
+          }
+          if (chainNode.messageKey) {
+            const body = resolveMessage(flow, chainNode, profile, stepData);
+            if (body) outMessages.push({ type: 'text', body });
+          }
+          next = chainNode.next || next;
+          chainNode = nodes[next];
         }
-      }
-      if (node.action === 'referral_end') {
-        shouldEscalate = true;
-        updatedState.referralEscalation = {
-          referralName: stepData.referral_name,
-          referralMobile: stepData.referral_mobile,
-          referralCity: stepData.referral_city
-        };
-      }
-      if (node.action === 'escalate_support') {
-        shouldEscalate = true;
-        updatedState.supportEscalation = true;
-      }
-      if (node.action === 'referral_end') {
-        actionSucceeded = true;
-      }
-      if (actionSucceeded) {
-        updatedState.currentStep = node.next || currentStep;
-        let nextNode = nodes[updatedState.currentStep];
+        updatedState.currentStep = next;
+        const nextNode = nodes[next];
         if (nextNode && nextNode.type === 'message') {
           const body = resolveMessage(flow, nextNode, profile, stepData);
           if (body) outMessages.push({ type: 'text', body });
+          if (nextNode.next) updatedState.currentStep = nextNode.next;
         } else if (nextNode && nextNode.type === 'condition') {
           const conditions = nextNode.conditions || [];
-          let next = nextNode.defaultNext || updatedState.currentStep;
+          let condNext = nextNode.defaultNext || next;
           for (const c of conditions) {
             if (evaluateCondition(c.when, updatedState, input, userProfile)) {
-              next = c.next;
+              condNext = c.next;
               break;
             }
           }
-          updatedState.currentStep = next;
-          const targetNode = nodes[next];
+          updatedState.currentStep = condNext;
+          const targetNode = nodes[condNext];
           if (targetNode && (targetNode.type === 'message' || targetNode.type === 'menu')) {
             const body = resolveMessage(flow, targetNode, profile, stepData);
             if (body) outMessages.push({ type: 'text', body });
@@ -241,10 +282,10 @@ async function runFlow(state, userInput, userProfile, flow) {
         }
       } else {
         const retryKey = node.retryMessageKey || node.messageKey;
-        if (retryKey) {
-          const messages = flow.messages || {};
-          const body = substituteTemplate(messages[retryKey] || retryKey, profile, stepData);
-          if (body) outMessages.push({ type: 'text', body: `Could you please try again? ${body}` });
+        const messages = flow.messages || {};
+        const body = retryKey ? substituteTemplate(messages[retryKey] || retryKey, profile, stepData, flow.links || {}) : null;
+        if (body) {
+          outMessages.push({ type: 'text', body });
         } else {
           outMessages.push({ type: 'text', body: 'Could you please provide that again?' });
         }
@@ -270,14 +311,19 @@ async function runFlow(state, userInput, userProfile, flow) {
           if (body) outMessages.push({ type: 'text', body });
           updatedState.currentStep = targetNode.next;
         } else if (targetNode && targetNode.type === 'action' && targetNode.next) {
-          if (targetNode.action === 'escalate_support') {
+          if (targetNode.action === 'escalate_support' || targetNode.action === 'trigger_support_flow') {
             shouldEscalate = true;
             updatedState.supportEscalation = true;
           }
-          const nextNode = nodes[targetNode.next];
-          if (nextNode && nextNode.type === 'message') {
-            const body = resolveMessage(flow, nextNode, profile, stepData);
+          if (targetNode.messageKey) {
+            const body = resolveMessage(flow, targetNode, profile, stepData);
             if (body) outMessages.push({ type: 'text', body });
+          } else {
+            const nextNode = nodes[targetNode.next];
+            if (nextNode && nextNode.type === 'message') {
+              const body = resolveMessage(flow, nextNode, profile, stepData);
+              if (body) outMessages.push({ type: 'text', body });
+            }
           }
           updatedState.currentStep = targetNode.next;
         } else if (targetNode && targetNode.type === 'menu') {

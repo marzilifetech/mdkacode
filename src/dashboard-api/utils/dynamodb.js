@@ -1,5 +1,5 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, BatchWriteCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 
 const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: {
@@ -416,6 +416,138 @@ async function getDashboardStats(tables) {
   }
 }
 
+/**
+ * Delete a user and all their conversations, messages, and escalations.
+ * @param {object} tables - { userProfile, conversationState, messageLog, escalation }
+ * @param {string} mobile - User mobile (E.164 or 10-digit Indian)
+ * @returns {Promise<object>} { deleted: { userProfile, conversationState, messageLog, escalation } }
+ */
+async function deleteUserAndConversations(tables, mobile) {
+  if (!mobile || !tables?.userProfile) {
+    throw new Error('tables and mobile are required');
+  }
+  const results = { userProfile: 0, conversationState: 0, messageLog: 0, escalation: 0 };
+
+  async function batchDelete(tableName, items, keySchema) {
+    if (!items.length) return 0;
+    let deleted = 0;
+    for (let i = 0; i < items.length; i += 25) {
+      const batch = items.slice(i, i + 25).map((item) => ({
+        DeleteRequest: {
+          Key: keySchema.pk && keySchema.sk
+            ? { [keySchema.pk]: item[keySchema.pk], [keySchema.sk]: item[keySchema.sk] }
+            : { [keySchema.pk]: item[keySchema.pk] }
+        }
+      }));
+      await dynamoClient.send(new BatchWriteCommand({
+        RequestItems: { [tableName]: batch }
+      }));
+      deleted += batch.length;
+    }
+    return deleted;
+  }
+
+  if (tables.userProfile) {
+    const q = await dynamoClient.send(new QueryCommand({
+      TableName: tables.userProfile,
+      KeyConditionExpression: 'mobile = :m',
+      ExpressionAttributeValues: { ':m': mobile }
+    }));
+    const items = q.Items || [];
+    results.userProfile = await batchDelete(tables.userProfile, items, { pk: 'mobile', sk: 'profileType' });
+  }
+
+  if (tables.conversationState) {
+    const q = await dynamoClient.send(new QueryCommand({
+      TableName: tables.conversationState,
+      KeyConditionExpression: 'mobile = :m',
+      ExpressionAttributeValues: { ':m': mobile }
+    }));
+    const items = q.Items || [];
+    results.conversationState = await batchDelete(tables.conversationState, items, { pk: 'mobile', sk: 'conversationId' });
+  }
+
+  if (tables.messageLog) {
+    let lastKey = null;
+    do {
+      const params = {
+        TableName: tables.messageLog,
+        KeyConditionExpression: 'mobile = :m',
+        ExpressionAttributeValues: { ':m': mobile }
+      };
+      if (lastKey) params.ExclusiveStartKey = lastKey;
+      const q = await dynamoClient.send(new QueryCommand(params));
+      const items = q.Items || [];
+      results.messageLog += await batchDelete(tables.messageLog, items, { pk: 'mobile', sk: 'timestamp' });
+      lastKey = q.LastEvaluatedKey || null;
+    } while (lastKey);
+  }
+
+  if (tables.escalation) {
+    const q = await dynamoClient.send(new QueryCommand({
+      TableName: tables.escalation,
+      IndexName: 'mobile-index',
+      KeyConditionExpression: 'mobile = :m',
+      ExpressionAttributeValues: { ':m': mobile }
+    }));
+    const items = q.Items || [];
+    for (const item of items) {
+      await dynamoClient.send(new DeleteCommand({
+        TableName: tables.escalation,
+        Key: { escalationId: item.escalationId, timestamp: item.timestamp }
+      }));
+      results.escalation++;
+    }
+  }
+
+  return { deleted: results, mobile };
+}
+
+/**
+ * Delete all users and conversations (full reset). Does NOT delete BotConfig, Payment*.
+ * @param {object} tables - All table names (userProfile, conversationState, messageLog, escalation, authUser?, otpAttempt?)
+ * @returns {Promise<object>} { deleted: { ... } }
+ */
+async function deleteAllUsersAndConversations(tables) {
+  const results = {};
+  const tableConfigs = [
+    { key: 'userProfile', pk: 'mobile', sk: 'profileType' },
+    { key: 'conversationState', pk: 'mobile', sk: 'conversationId' },
+    { key: 'messageLog', pk: 'mobile', sk: 'timestamp' },
+    { key: 'escalation', pk: 'escalationId', sk: 'timestamp' }
+  ];
+
+  for (const tc of tableConfigs) {
+    const tableName = tables[tc.key];
+    if (!tableName) continue;
+    let deleted = 0;
+    let lastKey = null;
+    do {
+      const params = { TableName: tableName };
+      if (lastKey) params.ExclusiveStartKey = lastKey;
+      const scan = await dynamoClient.send(new ScanCommand(params));
+      const items = scan.Items || [];
+      for (let i = 0; i < items.length; i += 25) {
+        const batch = items.slice(i, i + 25).map((item) => ({
+          DeleteRequest: {
+            Key: tc.sk && item[tc.sk] !== undefined
+              ? { [tc.pk]: item[tc.pk], [tc.sk]: item[tc.sk] }
+              : { [tc.pk]: item[tc.pk] }
+          }
+        }));
+        await dynamoClient.send(new BatchWriteCommand({
+          RequestItems: { [tableName]: batch }
+        }));
+        deleted += batch.length;
+      }
+      lastKey = scan.LastEvaluatedKey || null;
+    } while (lastKey);
+    results[tc.key] = deleted;
+  }
+
+  return { deleted: results };
+}
+
 module.exports = {
   getUserProfile,
   getAllUserProfiles,
@@ -427,6 +559,8 @@ module.exports = {
   getUserEscalations,
   getEscalationById,
   resolveEscalation,
-  getDashboardStats
+  getDashboardStats,
+  deleteUserAndConversations,
+  deleteAllUsersAndConversations
 };
 

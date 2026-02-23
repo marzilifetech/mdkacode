@@ -11,7 +11,7 @@ function normalizeText(text) {
 function calculateAge(dob) {
   if (!dob || typeof dob !== 'string') return null;
   try {
-    const [d, m, y] = dob.split('-').map(Number);
+    const [d, m, y] = dob.split(/[-/]/).map(Number);
     if (!d || !m || !y) return null;
     const birth = new Date(y, m - 1, d);
     const today = new Date();
@@ -25,14 +25,69 @@ function calculateAge(dob) {
   }
 }
 
+/**
+ * Normalize DOB to DD-MM-YYYY for storage. Year-only (e.g. "1968") becomes 01-01-1968.
+ * @returns {string|null} DD-MM-YYYY or null
+ */
+function normalizeDOB(dob) {
+  if (!dob || typeof dob !== 'string') return null;
+  const t = dob.trim();
+  const thisYear = new Date().getFullYear();
+  const patterns = [
+    /(\d{1,2})[-/.\s](\d{1,2})[-/.\s](\d{4})/,
+    /(\d{4})[-/.\s](\d{1,2})[-/.\s](\d{1,2})/,
+    /(\d{1,2})[-/.\s](\d{1,2})[-/.\s](\d{2})\b/,
+    /^(\d{4})$/,           // year only: 1968 -> 01-01-1968
+    /^(\d{2})$/,           // 68 -> 01-01-1968 (assume 50+ for Marzi)
+  ];
+  for (const p of patterns) {
+    const match = t.match(p);
+    if (match) {
+      let day = '01', month = '01', year;
+      if (match[0] === t && match[1] && match.length === 2) {
+        const y = parseInt(match[1], 10);
+        if (y >= 1900 && y <= thisYear) {
+          year = String(y);
+          return `${day}-${month}-${year}`;
+        }
+        if (y >= 0 && y <= 99) {
+          year = y <= 50 ? 2000 + y : 1900 + y;
+          return `${day}-${month}-${year}`;
+        }
+      }
+      if (match.length >= 3) {
+        if (match[1].length === 4) {
+          year = match[1];
+          month = String(parseInt(match[2], 10)).padStart(2, '0');
+          day = String(parseInt(match[3], 10)).padStart(2, '0');
+        } else if (match[3].length === 2) {
+          const yy = parseInt(match[3], 10);
+          year = yy >= 0 && yy <= 50 ? 2000 + yy : 1900 + yy;
+          day = String(parseInt(match[1], 10)).padStart(2, '0');
+          month = String(parseInt(match[2], 10)).padStart(2, '0');
+        } else {
+          day = String(parseInt(match[1], 10)).padStart(2, '0');
+          month = String(parseInt(match[2], 10)).padStart(2, '0');
+          year = match[3];
+        }
+        const d = parseInt(day, 10);
+        const m = parseInt(month, 10);
+        const y = parseInt(year, 10);
+        if (d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1900 && y <= thisYear) {
+          return `${day}-${month}-${year}`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function isValidDOB(dob) {
-  if (!dob || typeof dob !== 'string') return false;
-  const match = dob.trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (!match) return false;
-  const [, day, month, year] = match.map(Number);
-  if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1900 || year > new Date().getFullYear()) return false;
+  const normalized = normalizeDOB(dob);
+  if (!normalized) return false;
+  const [day, month, year] = normalized.split('-').map(Number);
   const date = new Date(year, month - 1, day);
-  return date.getDate() === day && date.getMonth() === month - 1;
+  return date.getDate() === day && date.getMonth() === month - 1 && date.getFullYear() === year;
 }
 
 function isYes(message) {
@@ -56,73 +111,60 @@ function getMenuOption(message) {
   return null;
 }
 
+/** Capitalize each word for proper name display (Indian names). */
+function normalizeNameForDisplay(name) {
+  if (!name || typeof name !== 'string') return '';
+  return name.trim()
+    .split(/\s+/)
+    .map(w => (w.length > 0 ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function extractName(message) {
   if (!message || typeof message !== 'string') return null;
-  const t = message.trim();
+  const t = message.trim().replace(/\s+/g, ' ');
   if (t.length < 2 || t.length > 100) return null;
-  const excluded = ['yes', 'no', 'hello', 'hi', 'hey', 'ok', 'thanks', 'okay', 'sure'];
-  if (excluded.includes(t.toLowerCase())) return null;
+  const excluded = ['yes', 'no', 'hello', 'hi', 'hey', 'ok', 'thanks', 'okay', 'sure', 'alright', 'hmm', 'na'];
+  const lower = t.toLowerCase();
+  if (excluded.includes(lower)) return null;
   const patterns = [
-    /(?:my\s+)?name\s+is\s+([a-zA-Z\s.]+)/i,
-    /i\s*am\s+([a-zA-Z\s.]+)/i,
-    /(?:this\s+is|call\s+me)\s+([a-zA-Z\s.]+)/i,
-    /(?:i'm|im)\s+([a-zA-Z\s.]+)/i
+    /(?:my\s+)?name\s+is\s+([a-zA-Z\s.'-]+)/i,
+    /(?:mera\s+naam|mujhe\s+kehte\s+hain)\s+([a-zA-Z\s.'-]+)/i,
+    /i\s*am\s+([a-zA-Z\s.'-]+)/i,
+    /(?:this\s+is|call\s+me)\s+([a-zA-Z\s.'-]+)/i,
+    /(?:i'm|im)\s+([a-zA-Z\s.'-]+)/i,
+    /name[:\s]+([a-zA-Z\s.'-]+)/i,
+    /^(?:dr\.?|shri|smt\.?|mr\.?|mrs\.?|ms\.?)\s*([a-zA-Z\s.'-]+)$/i
   ];
   for (const p of patterns) {
     const m = t.match(p);
     if (m && m[1]) {
-      const name = m[1].trim().split(/\s+/).slice(0, 3).join(' ');
-      if (name.length >= 2 && /[a-zA-Z]/.test(name)) return name;
+      const raw = m[1].trim().replace(/\s+/g, ' ');
+      const parts = raw.split(/\s+/).slice(0, 4);
+      const name = parts.join(' ');
+      if (name.length >= 2 && /[a-zA-Z]/.test(name) && name.length <= 80) return normalizeNameForDisplay(name);
     }
   }
-  if (/^[a-zA-Z\s.]{2,50}$/.test(t) && !excluded.includes(t.toLowerCase())) return t;
+  if (/^[a-zA-Z\s.'-]{2,80}$/.test(t) && /[a-zA-Z]{2,}/.test(t) && !excluded.includes(lower)) return normalizeNameForDisplay(t);
   return null;
 }
 
 function extractDOB(message) {
   if (!message || typeof message !== 'string') return null;
-  const t = message.trim();
-  const patterns = [
-    /(\d{1,2})[-/.\s](\d{1,2})[-/.\s](\d{4})/,
-    /(\d{4})[-/.\s](\d{1,2})[-/.\s](\d{1,2})/,
-    /(\d{1,2})[-/.\s](\d{1,2})[-/.\s](\d{2})/  // 12-05-60 -> assume 1960
-  ];
-  for (const p of patterns) {
-    const match = t.match(p);
-    if (match) {
-      let day, month, year;
-      if (match[3].length === 2) {
-        const yy = parseInt(match[3], 10);
-        year = yy >= 0 && yy <= 50 ? 2000 + yy : 1900 + yy;
-        day = match[1].padStart(2, '0');
-        month = match[2].padStart(2, '0');
-      } else if (match[1].length === 4) {
-        year = match[1];
-        month = match[2].padStart(2, '0');
-        day = match[3].padStart(2, '0');
-      } else {
-        day = match[1].padStart(2, '0');
-        month = match[2].padStart(2, '0');
-        year = match[3];
-      }
-      const d = parseInt(day, 10);
-      const m = parseInt(month, 10);
-      const y = parseInt(year, 10);
-      if (d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1900 && y <= new Date().getFullYear()) {
-        return `${day}-${month}-${year}`;
-      }
-    }
-  }
-  return null;
+  return normalizeDOB(message.trim());
 }
 
 function extractCity(message) {
   if (!message || typeof message !== 'string') return null;
-  const t = message.trim()
-    .replace(/^(i live in|i am from|my city is|city is|i stay in|staying in|located in)\s*/i, '')
-    .replace(/\s*\.\s*$/, '')
+  let t = message.trim().replace(/\s+/g, ' ')
+    .replace(/^(?:i\s+live\s+in|i\s+am\s+from|my\s+city\s+is|city\s+is|i\s+stay\s+in|staying\s+in|located\s+in|based\s+in|mera\s+city|i\s+reside\s+in)\s*/i, '')
+    .replace(/^(?:it'?s?|its)\s+/i, '')
+    .replace(/\s*[.,;:!?]\s*$/, '')
+    .replace(/\s+\d{6}\s*$/, '')
     .trim();
-  if (t.length < 2 || t.length > 100 || !/[a-zA-Z]/.test(t)) return null;
+  if (t.length < 2 || t.length > 80 || !/[a-zA-Z]/.test(t)) return null;
   return t;
 }
 
@@ -139,6 +181,8 @@ module.exports = {
   normalizeText,
   calculateAge,
   isValidDOB,
+  normalizeDOB,
+  normalizeNameForDisplay,
   isYes,
   isNo,
   getMenuOption,

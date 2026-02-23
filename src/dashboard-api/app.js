@@ -8,7 +8,9 @@ const {
   getPendingEscalations,
   getUserEscalations,
   resolveEscalation,
-  getDashboardStats
+  getDashboardStats,
+  deleteUserAndConversations,
+  deleteAllUsersAndConversations
 } = require('./utils/dynamodb');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, GetCommand, PutCommand } = require('@aws-sdk/lib-dynamodb');
@@ -106,7 +108,7 @@ async function sendMetaWhatsAppText(phoneNumberId, to, body) {
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type',
-  'Access-Control-Allow-Methods': 'GET,PATCH,POST,PUT,OPTIONS'
+  'Access-Control-Allow-Methods': 'GET,PATCH,POST,PUT,DELETE,OPTIONS'
 };
 
 /**
@@ -159,6 +161,31 @@ exports.handler = async (event) => {
       } else {
         result = await getAllUserProfiles(USER_PROFILE_TABLE, limit, lastKey);
       }
+      
+    } else if (path === '/dashboard/users' && method === 'DELETE') {
+      // Delete ALL users and conversations (full reset)
+      const tables = {
+        userProfile: USER_PROFILE_TABLE,
+        conversationState: CONVERSATION_STATE_TABLE,
+        messageLog: MESSAGE_LOG_TABLE,
+        escalation: ESCALATION_TABLE
+      };
+      result = await deleteAllUsersAndConversations(tables);
+      result.message = 'All users and conversations deleted';
+      
+    } else if (path.match(/^\/dashboard\/users\/[^/]+$/) && method === 'DELETE') {
+      // Delete a single user and all their conversations
+      const mobileParam = (event.pathParameters && event.pathParameters.mobile) ||
+        path.replace(/^\/dashboard\/users\//, '').split('/')[0];
+      const mobile = normalizeMobile(mobileParam) || mobileParam;
+      const tables = {
+        userProfile: USER_PROFILE_TABLE,
+        conversationState: CONVERSATION_STATE_TABLE,
+        messageLog: MESSAGE_LOG_TABLE,
+        escalation: ESCALATION_TABLE
+      };
+      result = await deleteUserAndConversations(tables, mobile);
+      result.message = `User ${mobile} and all conversations deleted`;
       
     } else if (path === '/dashboard/conversations' && method === 'GET') {
       // Get conversation states

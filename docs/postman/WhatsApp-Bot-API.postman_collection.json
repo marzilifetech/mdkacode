@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "WhatsApp Bot API",
-    "description": "Auth API (OTP + JWT), Dashboard API (stats, users, flows, bot status, manual send), Meta Webhook, Payment API (Razorpay), Antakshari API. Use Postman environments: Local (base_url = http://localhost:3001) or Prod (base_url = your API Gateway URL).",
+    "description": "Auth API (OTP + JWT), Dashboard API (stats, users, flows, bot status, manual send, delete user, delete all users), Meta Webhook, Payment API (Razorpay), Antakshari API. Use Postman environments: Local (base_url = http://localhost:3001) or Prod (base_url = your API Gateway URL).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -262,6 +262,32 @@
               "query": [{ "key": "mobile", "value": "{{mobile}}" }]
             },
             "description": "GET single user profile by mobile."
+          }
+        },
+        {
+          "name": "Delete User (by mobile)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/users/{{mobile}}",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "users", "{{mobile}}"]
+            },
+            "description": "Delete a single user and all their data: profile, conversation states, messages, and escalations. Set {{mobile}} in collection variables (e.g. 919876543210 or 9876543210)."
+          }
+        },
+        {
+          "name": "Delete All Users",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/users",
+              "host": ["{{base_url}}"],
+              "path": ["dashboard", "users"]
+            },
+            "description": "Delete ALL users and conversations (full reset). Does NOT delete BotConfig or Payment data."
           }
         },
         {

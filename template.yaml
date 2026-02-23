@@ -535,6 +535,18 @@ Resources:
             Path: /dashboard/users
             Method: get
             RestApiId: !Ref ApiGateway
+        DashboardUsersDelete:
+          Type: Api
+          Properties:
+            Path: /dashboard/users
+            Method: delete
+            RestApiId: !Ref ApiGateway
+        DashboardUserDelete:
+          Type: Api
+          Properties:
+            Path: /dashboard/users/{mobile}
+            Method: delete
+            RestApiId: !Ref ApiGateway
         DashboardConversations:
           Type: Api
           Properties:
