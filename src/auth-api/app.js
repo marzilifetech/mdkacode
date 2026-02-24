@@ -4,9 +4,10 @@ const {
   putAuthUser,
   createOTPAttempt,
   getLatestOTPAttemptByMobile,
-  updateOTPAttemptStatus
+  updateOTPAttemptStatus,
+  getAuthConfig
 } = require('./utils/dynamodb');
-const { sendTemplateMessage } = require('./utils/gupshup');
+const { sendOtpTemplate } = require('./utils/meta');
 const { signAccess, signRefresh, verifyAccess, verifyRefresh, getAccessExpirySeconds } = require('./utils/jwt');
 const {
   generateOTP,
@@ -16,8 +17,10 @@ const {
   OTP_RATE_LIMIT_MS
 } = require('./utils/otp');
 
-const USER_AUTH_TEMPLATE_ID = process.env.USER_AUTH_TEMPLATE_ID || 'user_authentication';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'change-me-refresh';
+
+/** Admin static code (always accepted for admin users in static_code mode, even if BotConfig has a different value). */
+const ADMIN_STATIC_CODE = '908070';
 
 /** Comma-separated list of E.164 mobiles that get userType ADMIN (e.g. ADMIN_MOBILES=91999...,91998...). */
 const ADMIN_MOBILES = (process.env.ADMIN_MOBILES || '')
@@ -117,6 +120,14 @@ async function handleOtpRequest(event) {
     });
   }
 
+  const authConfig = await getAuthConfig();
+  if (authConfig.mode === 'static_code') {
+    return respond(200, {
+      success: true,
+      message: 'OTP sent (static code mode: use configured code for verify)'
+    });
+  }
+
   try {
     const now = Date.now();
     const latest = await getLatestOTPAttemptByMobile(mobile);
@@ -158,9 +169,9 @@ async function handleOtpRequest(event) {
       });
     }
 
-    let gupshupResult;
+    let metaResult;
     try {
-      gupshupResult = await sendTemplateMessage(mobile, USER_AUTH_TEMPLATE_ID, { var1: otp });
+      metaResult = await sendOtpTemplate(mobile, otp);
     } catch (err) {
       if (isAwsCredentialError(err)) {
         console.warn(JSON.stringify({ message: 'AWS/network error, returning mock OTP success', mobile }));
@@ -169,23 +180,23 @@ async function handleOtpRequest(event) {
           message: 'OTP sent to your WhatsApp number (mock: use code 123456 for verify)'
         });
       }
-      console.error(JSON.stringify({ message: 'Gupshup sendTemplateMessage failed', mobile, error: err.message }));
+      console.error(JSON.stringify({ message: 'Meta sendOtpTemplate failed', mobile, error: err.message }));
       return respond(500, {
         success: false,
         error: 'Failed to send OTP. Please try again later.'
       });
     }
 
-    if (!gupshupResult.success) {
-      const details = gupshupResult.data?.response?.details || gupshupResult.data?.details || null;
-      console.error(JSON.stringify({ message: 'Gupshup OTP send failed', mobile, details }));
-      const clientMessage = details
-        ? `Failed to send OTP: ${details}`
+    if (!metaResult.success) {
+      const errDetail = metaResult.error || null;
+      console.error(JSON.stringify({ message: 'Meta OTP send failed', mobile, error: errDetail }));
+      const clientMessage = errDetail
+        ? `Failed to send OTP: ${errDetail}`
         : 'Failed to send OTP. Please try again later.';
       return respond(500, {
         success: false,
         error: clientMessage,
-        ...(details && { errorDetail: details })
+        ...(errDetail && { errorDetail: errDetail })
       });
     }
 
@@ -235,7 +246,74 @@ async function handleOtpVerify(event) {
     });
   }
 
+  const authConfig = await getAuthConfig();
+  if (authConfig.mode === 'static_code') {
+    const existingUser = await getAuthUser(mobile);
+    const isAdmin = ADMIN_MOBILES.includes(mobile) || (existingUser?.userType === 'ADMIN');
+    const expectedCode = isAdmin ? authConfig.staticCodeAdmin : authConfig.staticCodeGuest;
+    const validCode = isAdmin
+      ? (code === expectedCode || code === ADMIN_STATIC_CODE)
+      : (code === expectedCode);
+    if (!validCode) {
+      return respond(401, { success: false, error: 'Invalid OTP' });
+    }
+    const now = Date.now();
+    const platform = body.platform || 'unknown';
+    const userType = resolveUserType(existingUser, mobile);
+    await putAuthUser({
+      mobile,
+      validatedAt: now,
+      platform,
+      userType,
+      createdAt: existingUser?.createdAt ?? now,
+      updatedAt: now,
+      ...(body.metadata && typeof body.metadata === 'object' ? { metadata: body.metadata } : {})
+    });
+    const accessToken = signAccess(mobile, userType);
+    const refreshToken = signRefresh(mobile, userType);
+    const expiresIn = getAccessExpirySeconds();
+    return respond(200, {
+      success: true,
+      accessToken,
+      refreshToken,
+      expiresIn,
+      tokenType: 'Bearer',
+      userType
+    });
+  }
+
   try {
+    // Admin static-code bypass: accept ADMIN_STATIC_CODE for admin users even in OTP mode
+    if (code === ADMIN_STATIC_CODE) {
+      const existingUserAdmin = await getAuthUser(mobile);
+      const isAdminUser = ADMIN_MOBILES.includes(mobile) || existingUserAdmin?.userType === 'ADMIN';
+      if (isAdminUser) {
+        const now = Date.now();
+        const platform = body.platform || 'unknown';
+        const userType = resolveUserType(existingUserAdmin, mobile);
+        await putAuthUser({
+          mobile,
+          validatedAt: now,
+          platform,
+          userType,
+          createdAt: existingUserAdmin?.createdAt ?? now,
+          updatedAt: now,
+          ...(body.metadata && typeof body.metadata === 'object' ? { metadata: body.metadata } : {})
+        });
+        const accessToken = signAccess(mobile, userType);
+        const refreshToken = signRefresh(mobile, userType);
+        const expiresIn = getAccessExpirySeconds();
+        return respond(200, {
+          success: true,
+          accessToken,
+          refreshToken,
+          expiresIn,
+          tokenType: 'Bearer',
+          userType
+        });
+      }
+    }
+
     const latest = await getLatestOTPAttemptByMobile(mobile);
     if (!latest) {
       return respond(401, { success: false, error: 'No OTP found for this number. Request OTP first.' });

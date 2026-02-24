@@ -646,19 +646,27 @@ Resources:
         Variables:
           AUTH_USER_TABLE_NAME: !Ref AuthUser
           OTP_ATTEMPT_TABLE_NAME: !Ref OTPAttempt
-          GUPSHUP_USER_ID: "2000261475"   # Template/OTP only (conversational uses different credentials)
-          GUPSHUP_PASSWORD: "Op9uy64zU"
-          JWT_ACCESS_SECRET: "change-me-in-production"
-          JWT_REFRESH_SECRET: "change-me-refresh-in-production"
+          BOT_CONFIG_TABLE_NAME: !Ref BotConfig
+          META_PAGE_ACCESS_TOKEN_SSM_NAME: "/whatsapp-bot/meta-page-access-token"
+          META_GRAPH_API_VERSION: "v25.0"
+          META_PHONE_NUMBER_ID: "1048410191679469"
+          JWT_ACCESS_SECRET: "Q7iy0he7bWpqJJj7Py95HypnUsNcALDIojeklrp"
+          JWT_REFRESH_SECRET: "!L}EMq}'!k#hL]].r0^K~KH#ReVFQuZ{p@Mpg=~W--,CCY3oi2"
           JWT_ACCESS_EXPIRY: "1h"
           JWT_REFRESH_EXPIRY: "7d"
-          USER_AUTH_TEMPLATE_ID: "1440838324490390"  # Or META Template ID from Gupshup Console (Templates -> info icon)
           ADMIN_MOBILES: ""   # Optional: comma-separated E.164 mobiles that get userType ADMIN (e.g. 919999999999,919888888888)
+          AUTH_MODE: "static_code"   # Temporary: "static_code" = skip OTP send, accept static codes; "otp" = normal OTP. Override via BotConfig configKey "auth".
+          AUTH_STATIC_CODE_GUEST: "123456"   # Code for non-admin when AUTH_MODE=static_code
+          AUTH_STATIC_CODE_ADMIN: "9090"    # Code for ADMIN_MOBILES when AUTH_MODE=static_code
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AuthUser
         - DynamoDBCrudPolicy:
             TableName: !Ref OTPAttempt
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BotConfig
+        - SSMParameterWithSlashPrefixReadPolicy:
+            ParameterName: "/whatsapp-bot/meta-page-access-token"
         - CloudWatchLogsFullAccess
       Events:
         AuthOtpRequest:
@@ -793,7 +801,7 @@ Resources:
           ANTAKSHARI_MEMBER_TABLE_NAME: !Ref AntakshariMember
           USER_PROFILE_TABLE_NAME: !Ref UserProfile
           PAYMENT_ORDER_TABLE_NAME: !Ref PaymentOrder
-          JWT_ACCESS_SECRET: "change-me-in-production"
+          JWT_ACCESS_SECRET: "Q7iy0he7bWpqJJj7Py95HypnUsNcALDIojeklrp"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AntakshariTeam

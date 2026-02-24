@@ -13,6 +13,7 @@ const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 
 const AUTH_USER_TABLE = process.env.AUTH_USER_TABLE_NAME;
 const OTP_ATTEMPT_TABLE = process.env.OTP_ATTEMPT_TABLE_NAME;
+const BOT_CONFIG_TABLE = process.env.BOT_CONFIG_TABLE_NAME || '';
 
 const GSI_MOBILE_REQUESTED_AT = 'mobile-requestedAt-index';
 
@@ -80,6 +81,38 @@ async function getLatestOTPAttemptByMobile(mobile) {
 }
 
 /**
+ * Get auth config from BotConfig (configKey: 'auth').
+ * Drives static_code vs OTP: { mode: 'static_code'|'otp', staticCodeGuest, staticCodeAdmin }.
+ * Falls back to env AUTH_MODE, AUTH_STATIC_CODE_GUEST, AUTH_STATIC_CODE_ADMIN.
+ * @returns {Promise<{ mode: string, staticCodeGuest: string, staticCodeAdmin: string }>}
+ */
+async function getAuthConfig() {
+  const defaults = {
+    mode: process.env.AUTH_MODE || 'otp',
+    staticCodeGuest: process.env.AUTH_STATIC_CODE_GUEST || '123456',
+    staticCodeAdmin: process.env.AUTH_STATIC_CODE_ADMIN || '908070'
+  };
+  if (!BOT_CONFIG_TABLE) return defaults;
+  try {
+    const result = await dynamoClient.send(
+      new GetCommand({
+        TableName: BOT_CONFIG_TABLE,
+        Key: { configKey: 'auth' }
+      })
+    );
+    const item = result.Item;
+    if (!item || !item.mode) return defaults;
+    return {
+      mode: String(item.mode),
+      staticCodeGuest: item.staticCodeGuest != null ? String(item.staticCodeGuest) : defaults.staticCodeGuest,
+      staticCodeAdmin: item.staticCodeAdmin != null ? String(item.staticCodeAdmin) : defaults.staticCodeAdmin
+    };
+  } catch (err) {
+    return defaults;
+  }
+}
+
+/**
  * Update OTP attempt status (e.g. to 'verified').
  * @param {string} attemptId - UUID
  * @param {string} status - New status
@@ -102,5 +135,6 @@ module.exports = {
   putAuthUser,
   createOTPAttempt,
   getLatestOTPAttemptByMobile,
-  updateOTPAttemptStatus
+  updateOTPAttemptStatus,
+  getAuthConfig
 };

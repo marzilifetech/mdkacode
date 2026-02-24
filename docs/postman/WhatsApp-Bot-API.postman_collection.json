@@ -134,7 +134,7 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "otp", "request"]
             },
-            "description": "Sends 6-digit OTP to the mobile number via WhatsApp (template: 4a4ac078-72a2-4f3d-b8cf-c0e0c3359d20). Rate limit: 30 seconds per mobile."
+            "description": "Sends 6-digit OTP via Meta WhatsApp Cloud API (template: otp_verification_code, ENG/US — '{{1}} is your verification code. For your security, do not share this code.'). Rate limit: 30 seconds per mobile."
           }
         },
         {
